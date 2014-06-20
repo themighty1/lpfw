@@ -1,0 +1,31 @@
+<<<----Leopard Flower 0.4 (released Feb 2012)---->>>
+
+    INSTALLATION INSTRUCTIONS
+
+These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
+
+The following packaged must be installed for lpfw daemon to compile:
+    libnetfilter-queue-dev
+    libnetfilter-conntrack-dev
+    libcap-dev
+The following packaged must be installed for lpfwcli frontend to compile:
+    libncursesw5-dev
+    optional: zenity(for popup notifications)
+The following packaged must be installed for python frontend to compile:
+    libpython2.6
+    python2.6-dev
+
+!!! Additional packages are required to run lpfw properly, please see README for extra packages and usage info
+
+Navigate into the source folder and type:
+mkdir build
+cd build
+make -C ../ DESTDIR=`pwd`
+
+Now build folder should have files lpfw, lpfwcli, lpfwpygui and folder lpfw-pygui.
+
+  On some systems after typing "make", you may get a warning similar to the one below:
+  lpfw.c:1230:32: warning: passing argument 2 of ‘nfq_get_payload’ from
+  incompatible pointer type
+  /usr/local/include/libnetfilter_queue/libnetfilter_queue.h:107:12: note: expected ‘unsigned char **’ but argument is of type ‘char **’
+  This warning can be safely ignored.

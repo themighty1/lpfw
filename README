@@ -1,0 +1,162 @@
+<<<----Leopard Flower 0.4 (released Feb 2012)---->>>
+
+  Leopard Flower personal firewall for Linux (LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon and a frontend which comes in two flavours: text based "lpfwcli" and graphical "lpfwpygui".
+
+These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
+
+The following packaged must be installed for lpfw daemon to run:
+  iptables
+  libnetfilter-queue
+  libnetfilter-conntrack
+The following packages must be installed for the graphical frontend to run:
+  python-qt4 (this will pull in 80 MB+ of dependencies)
+
+
+SIMPLE CONFIGURATION:
+  1. Make sure lpfw,lpfwcli, and lpfwpygui are in the same folder
+  2. In a terminal window navigate into the folder where lpfw is located and launch "./lpfw" as root
+  3. In a terminal window of an X session navigate into the folder where lpfw is located and launch "./lpfwcli" or "./lpfwpygui" as a regular user (not root). You will see the frontend.
+IMORTANT: run sysctl -w net.netfilter.nf_conntrack_acct=1 otherwise conntrack's byte counting wont work
+
+
+ADVANCED CONFIGURATION:
+
+    If you don't want lpfw and lpfwcli/lpfwpygui to be in the same folder, you can pass to lpfw a command line option --cli-path=/--pygui-path= followed by a path to lpfwcli/lpfwgui. Otherwise lpfw rejects the frontend.
+
+    The same goes for lpfwpygui and the folder lpfw-pygui. Use lpfwpygui's --py-folder switch to indicate an alternative location.
+
+    lpfw can be run as user with the following capabilities:
+CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID, CAP_CHOWN, CAP_FSETID, CAP_KILL
+
+    If you want lpfw to start upon system boot-up, lpfw.conf is an upstart script which should be placed into /etc/init.(If your distro doen't use upstart, then the script should be adjusted to your distro's needs). This script expects to find lpfw in /usr/sbin
+
+    30-lpfw.conf can be placed into /etc/rsyslog.d if you want logs to go to syslog
+
+    Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "./lpfw --cli" or "./lpfw --gui" as a regular user (not root). You will see an ncurses-based/graphical frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfw --cli --no-zenity)
+
+
+
+
+COMMANDLINE ARGUMENTS:
+  These can be also seen with "lpfw --help".
+
+  --rules-file=
+  File to which rules are commited (default: /etc/lpfw.rules)
+
+  --logging_facility=
+  Where to write logs. Possible values stdout(default), file, syslog
+
+  --log-file= 
+  If --logging_facility=file, then this is the file to which to write logging information. Default /tmp/lpfw.log
+
+  --pid-file=
+  Pidfile which prevents two instances of lpfw being launched at the same time. Default /var/log/lpfw.pid
+
+  --cli-path=
+  Path to lpfwcli ncurses frontend. It will be launched in xterm window. Default: in the same folder as lpfw
+
+  --pygui-path
+  Path to python-based graphical frontend lpfwgui.py. It will be launched in python. Default: in the same folder as lpfw 
+
+  --log-info=
+  --log-traffic=
+  --log-debug=
+  Enables different levels of logging. Possible values 1 or 0 for yes/no. Default: all three 1.
+
+
+
+
+KNOWN ISSUES:
+    Only IPv4 is supported, IPv6 support is underway.
+    Only one program can send ICMP packets simultaneously, if more than one does, LPFW blocks both.
+    A combination of exceptionally large executables like Skype and SR Ware Iron(20Mb+) + slow CPU may result in a 2+ seconds delay when an application connects to the web for the first time, due to heavy calculations performed by sha512 checksumming function.
+    Only TCP, UDP, ICMP (partly, see above) protocols are supported. If your system happens to use any other transport protocol besides TCP/UDP/ICMP and you don't want those packets discarded by lpfw, consider adding a rule to iptables something like: >>> iptables -I OUTPUT 1 -p udplite -j ACCEPT <<< This rule should preceed NFQUEUE rule.
+    If LPFW crashes, the user will have to issue "iptables -F" as root to be able to access the internet without restarting computer.
+
+
+
+THE REST OF THIS FILE'S CONTENTS IS TECHNICAL INFORMATION FOR SYSTEM ADMINISTRATORS AND ADVANCED USERS:
+
+
+HEADLESS MODE - WITHOUT FRONTEND:
+  If you want to run LPFW without the frontend, you may want to edit the rulesfile manually
+  By default rules are written to /etc/lpfw.rules in the following  blocks of text:
+
+  full path to the executable file <new line character>
+  ALLOW_ALWAYS or DENY_ALWAYS <new line character>
+  executable file's size in bytes <new line character>
+  executable file's sha512 sum in hexadecimal representation <new line character>
+  the block ends with a <new line character>
+
+    or (if traffic was initiated by the kernel as is the case with NFS, SMB mounts)
+   KERNEL_PROCESS <new line character>
+   IP adress which the kernel is allowed to send/receive traffic to/from <new line character>
+   ALLOW_ALWAYS or DENY_ALWAYS <new line character>
+
+  Example:
+ --------------------------------------------------
+  /usr/bin/wget
+  ALLOW_ALWAYS
+  333356
+  083c1c88f8ded3cc1d6f83687e3092efab938d6a18ad5f95728189861e9d7bb145651a3a0b7846df69f02f10c50e45361880d4ea2549615a655643ed0bd20fa9
+
+  KERNEL_PROCESS
+  8.8.8.8
+  DENY_ALWAYS
+
+  /home/wwwwww/apps/browsers/opera-11.10-2048.i386.linux/lib/opera/opera
+  ALLOW_ALWAYS
+  16634040
+  7c4f6bd7c742c4bb8096e18fea5f92c6eade14152cf0ccdd36934b61ce1f578553e65be377408d34727c9aabed4ab3842f8cbbe776cd156d75f160925bea8c9f
+
+---------------------------------------------------------
+
+TRAFFIC LOGGING FORMAT
+
+An example of traffic log's line:
+<UDP src 11239 dst 80.233.253.203:40320  /home/wwwwww/apps/skype_static-2.2.0.35/skype 2150 allow
+1 2   3    4    5          6        7                                8                   9    10
+
+1. direction of traffic "<" outgoing, ">" incoming
+2. Protocol type UDP / TCP
+3. stands for "source", i.e. the machine which originated the packet
+4. port on source machine
+5. stands for "destination", i.e. the machine for which the packet is destined
+6. IP address of destination machine
+7. port of destination machine
+8. Path to the executable which initiated the packet or for which the packet was destined
+9. Process ID of the executable
+10. Action taken by LPFW with regard to this packet
+
+
+
+
+
+
+ARCHITECTURE
+
+LeopardFlower (LPFW) utilizes a facility provided by netfilter whereby all outgoing and incoming packets which initiate a new connection are delivered to LPFW for decision on whether to drop them or accept them. LPFW sets up a rule with iptables similar to
+iptables -A OUTPUT -j NFQUEUE --queue-num 11220
+and installs a callback (using libnetfilter_queue) which is notified whenever a packet hits the NFQUEUE (NFQ). The fact that LPFW doesn't need to process every single packet but only those which initiate new connections, significantly decreases LPFW's CPU consumption.
+
+Upon start up, LPFW read a rules file which contains internet access permissions per application. Based upon these rules, whenever a new packet hits NFQ, LPFW decides whether to allow or deny internet access or whether to ask the user what to do if no rule for the application in question has yet been defined.
+
+In order to establish a correlation between a packet which hit nfq and the application which sent it, LPFW does the following:
+1. for an outgoing packet - extract source port  (for an incoming packet - extract destination port) and look up in /proc/net/tcp to see which socket corresponds to the port.
+2. Having found the socket, scan /proc/<PID>/fd to see which process owns the socket
+3 Finally extract the application name from /proc/<PID>/exe
+
+LPFW sets a unique netfilter mark on all connections of a specific app. This enables LPFW to instantly halt all app's internet activity if user chooses so. In order to set such a netfilter mark, LPFW uses libnetfilter_conntrack library.
+
+SECURITY
+
+Only frontend with GID "lpfwuser" can communicate with LPFW. To that end LPFW enable setgid bit on lpfwcli and lpfwpygui.
+LPFW needs to start with the following capabilities:
+CAP_SYS_PTRACE (to readlink() root's links in /proc)
+CAP_NET_ADMIN (to use netfilter_queue and netfilter_conntrack)
+CAP_DAC_READ_SEARCH (to scan all users' /proc/ entries)
+CAP_SETUID (to setuid(0) on itself)
+CAP_SETGID (to setgid("lpfwuser") on itself)
+CAP_CHOWN (to chown group to "lpfwuser" on frontends' executables)
+CAP_FSETID (to enable setgid bit on frontends' executables)
+CAP_KILL (to poll the frontend to be able to know when frontend crashes unexpectedly)
