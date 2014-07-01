@@ -9,9 +9,7 @@ extern pthread_cond_t condvar;
 extern pthread_mutex_t condvar_mutex;
 extern char predicate;
 extern int nfmark_to_delete_in, nfmark_to_delete_out;
-extern struct nf_conntrack *ct_out_tcp, *ct_out_udp, *ct_out_icmp, *ct_in;
-extern int nfmark_to_set_out_tcp, nfmark_to_set_out_udp,nfmark_to_set_out_icmp, nfmark_to_set_in;
-extern struct nfct_handle *setmark_handle_out_tcp, *setmark_handle_in, *setmark_handle_out_udp, *setmark_handle_out_icmp;
+extern int nfmark_to_set;
 
 //Register a callback to delete nfmark and wait on condition to be triggered.
 void* thread_ct_delete_mark ( void* ptr );

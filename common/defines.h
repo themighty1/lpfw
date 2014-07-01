@@ -4,17 +4,11 @@
 #define TRUE 1
 #define FALSE 0
 
-#define TYPE_D2FLIST  100
-#define MSGQNUM_D2F_CHAR 101
-#define MSGQNUM_D2F_INT  102
-#define MSGQNUM_F2D_CHAR 1001
-#define MSGQNUM_F2D_INT  1002
-
 #define PATHSIZE 1024 //length of IPC message. It is usually the path to the program that is sent in IPC messages.
 #define PIDLENGTH 16
 #define PERMSLENGTH 16
 #define SOCKETBUFSIZE 32 // entries in /proc/<pid>/fd are in the form of socket:[1234567]
-#define NFQNUM_OUTPUT_TCP 11220 //arbitrary number used for iptables rule
+#define NFQNUM_OUT 11220 //arbitrary number used for iptables rule
 #define NFQNUM_OUTPUT_UDP 11222 //arbitrary number used for iptables rule
 #define NFQNUM_OUTPUT_REST 11223 //arbitrary number used for iptables rule
 #define NFQNUM_INPUT 11221
@@ -30,10 +24,6 @@
 #define MEMBUF_SIZE 65536 //buffer size to fread() /proc/net/tcp*,udp*
 #define MAX_CACHE 1024 ///proc/pid/FD sockets of one process
 
-//because sysvmsgq limit on the size of a message is usually 8192 bytes, we don't want to have to change it
-//we try to fit all export stats in one message which is approx 200 processes. If user wants to have more
-//processes displaying stats, he can increase the size of a sysv message or we will have to work around
-//this limitation, e.g. by using multiple messages
 #define CT_ENTRIES_EXPORT_MAX 200
 #define REFRESH_INTERVAL 1
 #define TEST_FAILED SIGUSR1
@@ -41,8 +31,8 @@
 #define MAGIC_NO 1111111111 //a token at the end of tcp_port_and_socket_cache
 #define DIRECTION_IN 1
 #define DIRECTION_OUT 2
-#define PROTO_TCP 3
-#define PROTO_UDP 4
+#define PROTO_TCP 6
+#define PROTO_UDP 17
 #define PROTO_ICMP 5
 
 #define TCP_IN_ALLOW  0

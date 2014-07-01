@@ -22,7 +22,7 @@ ifeq ($(DESTDIR), ./)
     DESTDIR = $(shell pwd)
 endif
 
-all: lpfw test
+all: lpfw testprocess
 
 lpfw: sha256.o conntrack.o testmain.o \
       argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
@@ -31,7 +31,7 @@ lpfw: sha256.o conntrack.o testmain.o \
 	    argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
 	    lpfw.cpp -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
-sha.o : sha256/sha256.c sha256/sha256.h sha256/u64.h
+sha256.o : sha256/sha256.c sha256/sha256.h sha256/u64.h
 	g++ $(g++FLAGS) -c sha256/sha256.c
 conntrack.o : conntrack.c conntrack.h
 	g++ $(g++FLAGS) -c conntrack.c
@@ -66,6 +66,6 @@ clean:
 	rm sha.o \
 	argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o
 	
-test: testprocess.cpp
-	g++ -g -std=c++11 testprocess.cpp -lnetfilter_queue -lpthread -o testprocess
+testprocess: testprocess.cpp
+	g++ -g -std=c++11 testprocess.cpp -lpthread -o testprocess
 	

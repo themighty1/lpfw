@@ -8,16 +8,16 @@
 #include <netinet/ip.h> //for INET_ADDRSTRLEN
 #include <pthread.h>
 #include <string>
+#include <vector>
 using namespace std;
 
 void die_syscall(string message);
 
 //macros enables any thread to use logging concurrently
 #define M_PRINTF(loglevel, ...) \
-    pthread_mutex_lock(&logstring_mutex); \
-    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
-    m_printf (loglevel, logstring); \
-    pthread_mutex_unlock(&logstring_mutex);
+    //pthread_mutex_lock(&logstring_mutex);
+    //cout << "LOG:" << logstring << "\n";
+    //pthread_mutex_unlock(&logstring_mutex);
 
 typedef char mbool;
 
@@ -40,46 +40,22 @@ typedef struct m_global_rule
     ports_list_t *ports_list;
 } global_rule_t;
 
-typedef struct m_ruleslist2
-{
-  int command;
-  int rules_number;
-  char path[PATHSIZE]; //path to executable
-  char pid[PIDLENGTH]; //its pid (or IP address for kernel processes)
-  char perms[PERMSLENGTH]; // permission in the form "ALLOW ALWAYS"
-  mbool is_active; //Has process already been seen sending/receiving packets?
-  u_int32_t nfmark_out;
-  u_int32_t nfmark_in; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
-  unsigned char first_instance; //TRUE for a first instance of an app or a parent process
-  //sha must be a uchar, otherwise if it's just char, printf "%x" will promote it to int and cause a lot of pain, SIGV
-  unsigned char sha[65]; //sha512sum digest
-  unsigned long long stime; // start time of the process
-  ino_t inode; // /proc/PID entry's inode number. Can change only if another process with the same PID is running
-  off_t exesize; //executable's size
-  struct m_ruleslist2 *prev; //previous element in dlist
-  struct m_ruleslist2 *next; // next element in dlist
-  long *sockets_cache;//pointer to 2D array of cache
-  DIR *dirstream; //a constantly open stream to /proc/PID/fd
-  char pidfdpath[32];
-} ruleslist2;
 
-
-typedef struct m_rule
-{
+struct rule{
   string path; //path to executable
   string pid; //its pid (or IP address for kernel processes)
-  string pidfdpath;
   string perms; // permission in the form "ALLOW ALWAYS"
-  string sha; //sha512sum digest
+  string sha; //sha256 hexdigest
   u_int32_t nfmark_out;
   u_int32_t nfmark_in; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
   bool is_active; //Has process already been seen sending/receiving packets?
   bool first_instance; //TRUE for a first instance of an app or a parent process
-  //sha must be a uchar, otherwise if it's just char, printf "%x" will promote it to int and cause a lot of pain, SIGV
+  //first_instance doesnt seem to be in use, i couldnt understand what it does
   unsigned long long stime; // start time of the process
-  long *sockets_cache;//pointer to 2D array of cache
+  vector<long> sockets;//sockets owned by the processes
+  string pidfdpath; //path to /proc/PID/fd
   DIR *dirstream; //a constantly open stream to /proc/PID/fd
-} rule;
+};
 
 
 typedef struct
@@ -194,18 +170,24 @@ enum
   INKERNEL_SOCKET_FOUND, //30
   INKERNEL_SOCKET_NOT_FOUND,
   INKERNEL_IPADDRESS_NOT_IN_DLIST,
-  SRCPORT_NOT_FOUND_IN_PROC,
-  DSTPORT_NOT_FOUND_IN_PROC,
+  SRCPORT_NOT_FOUND_IN_PROC, //not in use
+  DSTPORT_NOT_FOUND_IN_PROCNET,
   SOCKET_NOT_FOUND_IN_PROCPIDFD, //35
   SOCKET_FOUND_IN_PROCPIDFD,
-  PORT_NOT_FOUND_IN_PROCNET,
-  SOCKETS_CACHE_NOT_FOUND,
+  //SRCPORT_NOT_FOUND_IN_PROCNET happens when a process connect()s in non-blocking mode
+  //and immediately closes the socket. Or when so many new connections happen simultaneously
+  //that there is a lag in connection appearing in /proc/net/*
+  LOCALPORT_NOT_FOUND_IN_PROCNET,
+  SOCKET_IN_CACHE_NOT_FOUND,
   PATH_IN_RULES_NOT_FOUND,
-  SOCKET_ACTIVE_PROCESSES_NOT_FOUND, //40
+  PATH_IN_RULES_FOUND_BUT_PERMS_ARE_ONCE, //40
+  SOCKET_ACTIVE_PROCESSES_NOT_FOUND,
   GID_MATCH_ALLOW,
   GID_MATCH_DENY,
   SOCKET_ZERO_BUT_UID_NOT_ZERO,
-  SOCKET_CHANGED_FROM_ZERO
+  SOCKET_CHANGED_FROM_ZERO, //45
+  SEARCH_ACTIVE_PROCESSES_AGAIN,
+  PROCPIDSTAT_DOES_NOT_EXIST
 };
 
 //commands passed through msgq

@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <libnetfilter_conntrack/libnetfilter_conntrack.h>
 #include <netinet/in.h>
@@ -10,6 +11,7 @@
 #include <string.h> //for memcpy
 #include <pthread.h>
 #include <queue>
+#include <sstream>
 #include <sys/msg.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -34,14 +36,11 @@ char predicate = FALSE;
 //two NFCT_Q_DUMP simultaneous operations can produce an error
 pthread_mutex_t ct_dump_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ct_entries_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_t ct_dump_thr, ct_destroy_hook_thr, ct_delete_nfmark_thr;
 
-//netfilter mark to be put on an ALLOWed packet
-int nfmark_to_set_out_tcp, nfmark_to_set_out_udp,nfmark_to_set_out_icmp, nfmark_to_set_in;
 int nfmark_to_delete_in, nfmark_to_delete_out;
-
-struct nf_conntrack *ct_out_tcp, *ct_out_udp, *ct_out_icmp, *ct_in;
-struct nfct_handle *dummy_handle_delete, *dummy_handle_setmark_out, *dummy_handle_setmark_in;
-struct nfct_handle *setmark_handle_out_tcp, *setmark_handle_in, *setmark_handle_out_udp, *setmark_handle_out_icmp;
+struct nfct_handle *setmark_handle;
+extern bool conntrack_send_anyway;
 
 //this array is used internally by lpfw to prepare for export
 ulong ct_array[CT_ENTRIES_EXPORT_MAX][9] = {};
@@ -60,299 +59,252 @@ ulong ct_array_export[CT_ENTRIES_EXPORT_MAX][5] = {};
 */
 
 
+//Register a callback ct_destroy_cb that gets triggered whenever conntrack tries to destroy a connection
+//TODO: this is a weirdly-written old function. there is no need to block here.
 void * thread_ct_destroy( void *ptr)
 {
-  struct nfct_handle *traffic_handle;
-  if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, ct_destroy_cb, NULL) == -1))
-    {
-      perror("cb_reg");
-    }
-  int res = 0;
-  res = nfct_catch(traffic_handle); //the thread should block here
+  struct nfct_handle *traffic_handle = _nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY);
+  _nfct_callback_register(traffic_handle, NFCT_T_DESTROY, ct_destroy_cb, NULL);
+  nfct_catch(traffic_handle); //the thread should block here
 }
 
+
+//lpfw triggers condvar condition when a rule is deleted.
+//this thread will DUMP all conntracks onto ct_delete_mark_cb one by one
 void* thread_ct_delete_mark ( void* ptr )
 {
-  u_int8_t family = AF_INET; //used by conntrack
-  struct nfct_handle *deletemark_handle;
-  if ((deletemark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, ct_delete_mark_cb, NULL) == -1))
-    {
-      perror("cb_reg");
-    }
-
-  while(1)
-    {
-      _pthread_mutex_lock(&condvar_mutex);
-      while(predicate == FALSE)
-	{
-	  pthread_cond_wait(&condvar, &condvar_mutex);
-	}
-      predicate = FALSE;
-      _pthread_mutex_unlock(&condvar_mutex);
-      _pthread_mutex_lock(&ct_dump_mutex);
-      if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1)
-	{
-	  perror("query-DELETE");
-	}
-      _pthread_mutex_unlock(&ct_dump_mutex);
-    }
-}
-
-int setmark_out_tcp (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
-{
-  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out_tcp);
-  nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
-  return NFCT_CB_CONTINUE;
-}
-
-int setmark_out_udp (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
-{
-  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out_udp);
-  nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
-  return NFCT_CB_CONTINUE;
-}
-
-int setmark_out_icmp (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
-{
-  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out_icmp);
-  nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
-  return NFCT_CB_CONTINUE;
-}
-
-int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
-{
-  nfmark_to_set_in += NFMARK_DELTA;
-  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_in);
-  nfct_query(dummy_handle_setmark_in, NFCT_Q_UPDATE, mct);
-  return NFCT_CB_CONTINUE;
-}
-
-void  init_conntrack()
-{
   u_int8_t family = AF_INET;
-  //_nfct_new (ct_out_tcp);
-  //_nfct_new (ct_out_udp);
-  //_nfct_new (ct_out_icmp);
-  //_nfct_new (ct_in);
-  ct_out_tcp = nfct_new();
-  if (ct_out_tcp == NULL){
-    printf("nfct_new: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  ct_out_udp = nfct_new();
-  if (ct_out_udp == NULL){
-    printf("nfct_new: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  ct_out_icmp = nfct_new();
-  if (ct_out_icmp == NULL){
-    printf("nfct_new: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  ct_in = nfct_new();
-  if (ct_in == NULL){
-    printf("nfct_new: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  //_nfct_open (dummy_handle_delete, NFNL_SUBSYS_CTNETLINK, 0);
-  dummy_handle_delete = nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
-  if (dummy_handle_delete == NULL){
-    printf("nfct_open: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  //_nfct_query (dummy_handle_delete, NFCT_Q_FLUSH, &family);
-  int retval = nfct_query(dummy_handle_delete, NFCT_Q_FLUSH, &family);
-  if (retval == -1){
-    printf("nfct_query: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  //_nfct_open (dummy_handle_setmark_out, NFNL_SUBSYS_CTNETLINK, 0);
-  //_nfct_open (dummy_handle_setmark_in, NFNL_SUBSYS_CTNETLINK, 0);
-  //_nfct_open (setmark_handle_out_tcp, NFNL_SUBSYS_CTNETLINK, 0);
-  //_nfct_open (setmark_handle_out_udp, NFNL_SUBSYS_CTNETLINK, 0);
-  //_nfct_open (setmark_handle_out_icmp, NFNL_SUBSYS_CTNETLINK, 0);
-  //_nfct_open (setmark_handle_in, NFNL_SUBSYS_CTNETLINK, 0);
-  dummy_handle_setmark_out = nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
-  if (dummy_handle_setmark_out == NULL){
-    printf("nfct_open: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  dummy_handle_setmark_in = nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
-  if (dummy_handle_setmark_in == NULL){
-    printf("nfct_open: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  setmark_handle_out_tcp = nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
-  if (setmark_handle_out_tcp == NULL){
-    printf("nfct_open: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  setmark_handle_out_udp = nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
-  if (setmark_handle_out_udp == NULL){
-    printf("nfct_open: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  setmark_handle_out_icmp = nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
-  if (setmark_handle_out_icmp == NULL){
-    printf("nfct_open: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  setmark_handle_in = nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
-  if (setmark_handle_in == NULL){
-    printf("nfct_open: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  //_nfct_callback_register (setmark_handle_out_tcp, NFCT_T_ALL, setmark_out_tcp, NULL);
-  //_nfct_callback_register (setmark_handle_out_udp, NFCT_T_ALL, setmark_out_udp, NULL);
-  //_nfct_callback_register (setmark_handle_out_icmp, NFCT_T_ALL, setmark_out_icmp, NULL);
-  //_nfct_callback_register (setmark_handle_in, NFCT_T_ALL, setmark_in, NULL);
-  retval = nfct_callback_register(setmark_handle_out_tcp, NFCT_T_ALL, setmark_out_tcp, NULL);
-  if (retval == -1){
-    printf("nfct_callback_register: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  retval = nfct_callback_register(setmark_handle_out_udp, NFCT_T_ALL, setmark_out_udp, NULL);
-  if (retval == -1){
-    printf("nfct_callback_register: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  retval = nfct_callback_register(setmark_handle_out_icmp, NFCT_T_ALL, setmark_out_icmp, NULL);
-  if (retval == -1){
-    printf("nfct_callback_register: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
-  retval = nfct_callback_register(setmark_handle_in, NFCT_T_ALL, setmark_in, NULL);
-  if (retval == -1){
-    printf("nfct_callback_register: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );}
+  struct nfct_handle *deletemark_handle = _nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
+  _nfct_callback_register(deletemark_handle, NFCT_T_ALL, ct_delete_mark_cb, NULL);
+
+  while(1){
+    _pthread_mutex_lock(&condvar_mutex);
+    while(predicate == FALSE){
+      pthread_cond_wait(&condvar, &condvar_mutex);
+    }
+    predicate = FALSE;
+    _pthread_mutex_unlock(&condvar_mutex);
+    _pthread_mutex_lock(&ct_dump_mutex);
+    _nfct_query(deletemark_handle, NFCT_Q_DUMP, &family);
+    _pthread_mutex_unlock(&ct_dump_mutex);
+  }
+}
+
+
+//Set netfilter mark on a connection
+int setmark (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+{
+  static nfct_handle *handle = _nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set);
+  nfct_query(handle, NFCT_Q_UPDATE, mct);
+  return NFCT_CB_CONTINUE;
+}
+
+
+void init_conntrack(){
+  //enable byte accounting in conntrack
+  ofstream file("/proc/sys/net/netfilter/nf_conntrack_acct");
+  file << "1";
+  file.close();
+  //Flush all conntrack entries so that we're getting a fresh start
+  u_int8_t family = AF_INET;
+  nfct_handle *handle_flush = _nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+  _nfct_query (handle_flush, NFCT_Q_FLUSH, &family);
+  //register a callback which nfq_handler will call to set netfilter marks on connection
+  setmark_handle = _nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+   _nfct_callback_register (setmark_handle, NFCT_T_ALL, setmark, NULL);
 
   _pthread_create ( &tcp_export_thr, (pthread_attr_t *)NULL, tcp_export_thread, (void *)NULL);
-
+  _pthread_create ( &ct_dump_thr, (pthread_attr_t *)NULL, thread_ct_dump, (void *)NULL );
+  _pthread_create ( &ct_destroy_hook_thr, (pthread_attr_t *)NULL, thread_ct_destroy, (void *)NULL);
+  _pthread_create ( &ct_delete_nfmark_thr, (pthread_attr_t *)NULL, thread_ct_delete_mark, (void *)NULL);
 }
+
 
 void* tcp_export_thread ( void *ptr ) {
   ptr = 0;
-  srand (time(NULL)+1);
-  int sockfd, newsockfd, portno;
+  int sockfd, newsockfd;
   socklen_t clilen;
   struct sockaddr_in serv_addr, cli_addr;
   int n;
   sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0) perror("ERROR opening socket");
   bzero((char *) &serv_addr, sizeof(serv_addr));
-  do { portno = rand() % 65535;}
-  while (portno < 1025);
-  ofstream myfile("/tmp/ctport");
-  myfile << std::to_string(portno);
-  myfile.close();
+
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = INADDR_ANY;
-  serv_addr.sin_port = htons(portno);
+  serv_addr.sin_port = htons(0);
   if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-    perror("ERROR on binding");}
-  listen(sockfd,5);
-  clilen = sizeof(cli_addr);
-  newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-  if (newsockfd < 0) perror("ERROR on accept");
-  if(fcntl(newsockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0) {
-    printf ("Couldn't set socket to non-blocking"); }
+    perror("ERROR on binding");
+  }
+  int local_port;
+  struct sockaddr_in sin;
+  socklen_t addrlen = sizeof(sin);
+  if(getsockname(sockfd, (struct sockaddr *)&sin, &addrlen) == 0 &&
+    sin.sin_family == AF_INET && addrlen == sizeof(sin)) {
+    local_port = ntohs(sin.sin_port);
+  }
+  cout << "Conntrack port:" << to_string(local_port) << "\n";
+  ofstream myfile("/tmp/lpfwctport");
+  myfile << std::to_string(local_port);
+  myfile.close();
 
   string dispatch;
   while (true) {
-    if (ctmsgQueue.empty()) {
-      sleep(1);
-      continue;
+    listen(sockfd,1);
+    clilen = sizeof(cli_addr);
+    newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+    if (newsockfd < 0) perror("ERROR on accept");
+    if(fcntl(newsockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0) {
+      printf ("Couldn't set socket to non-blocking"); }
+
+    while(true){
+      if (ctmsgQueue.empty()) {
+        sleep(1);
+        continue;
+      }
+      try { //TODO a race condition is possible when ct_dump_thread clears the queue
+        dispatch = ctmsgQueue.front();
+      } catch (...) {continue;}
+      ctmsgQueue.pop();
+      n = send(newsockfd, dispatch.c_str(), dispatch.length(), MSG_NOSIGNAL);
+      if (n < 0) {break;};
     }
-    try { //TODO a race condition is possible when ct_dump_thread clears the queue
-      dispatch = ctmsgQueue.front();
-    } catch (...) {continue;}
-    ctmsgQueue.pop();
-    n = send(newsockfd, dispatch.c_str(), dispatch.length(), MSG_NOSIGNAL);
-    if (n < 0) continue;
   }
 }
 
 
+//delete conntracks which have the mark
 int ct_delete_mark_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
+  static nfct_handle *handle_delete = _nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
   int mark = nfct_get_attr_u32(mct, ATTR_MARK);
-  if ( mark == nfmark_to_delete_in || mark == nfmark_to_delete_out)
-    {
-      if (nfct_query(dummy_handle_delete, NFCT_Q_DESTROY, mct) == -1)
-	{
-	  M_PRINTF ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	  return NFCT_CB_CONTINUE;
-	}
-      M_PRINTF ( MLOG_DEBUG, "deleted entry %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+  if ( mark == nfmark_to_delete_in || mark == nfmark_to_delete_out){
+    if (nfct_query(handle_delete, NFCT_Q_DESTROY, mct) == -1){
+      printf("Error: nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return NFCT_CB_CONTINUE;
     }
+    cout << "deleted ct mark" << mark << "\n";
+    return NFCT_CB_CONTINUE;
+  }
   return NFCT_CB_CONTINUE;
 }
 
+
+//Receive one-by-one all conntracks and add current byte count
+//to the previous
 int ct_dump_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
-  int mark;
+  int i,mark;
   ulong in_bytes, out_bytes;
-  if ((mark = nfct_get_attr_u32(mct, ATTR_MARK)) == 0)
-    {
-      return NFCT_CB_CONTINUE;
-    }
+  if ((mark = nfct_get_attr_u32(mct, ATTR_MARK)) == 0){
+    return NFCT_CB_CONTINUE;}
   out_bytes = nfct_get_attr_u64(mct, ATTR_ORIG_COUNTER_BYTES);
   in_bytes = nfct_get_attr_u64(mct, ATTR_REPL_COUNTER_BYTES);
 
-  pthread_mutex_lock ( &ct_entries_mutex);
-  int i;
+  //No need to lock mutex here b/c it's being held by thread_ct_dump which called us
   for (i = 0; ct_array[i][0] != 0; ++i)
     {
       if (ct_array[i][0] != mark) continue;
       ct_array[i][1] += in_bytes;
       ct_array[i][2] += out_bytes;
-      pthread_mutex_unlock ( &ct_entries_mutex);
       return NFCT_CB_CONTINUE;
     }
   //the entry is not yet in array, adding now
   ct_array[i][0] = mark;
   ct_array[i][1] = in_bytes;
   ct_array[i][2] = out_bytes;
-  pthread_mutex_unlock ( &ct_entries_mutex);
   return NFCT_CB_CONTINUE;
 }
 
-//When conntrack deletes an entry, we get called. Bump up the in/out bytes statistics
+
+//When conntrack deletes an entry, we get called so we could
+//correctly work out the in/out bytes statistics
 int ct_destroy_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
-  int mark;
+  int i,mark;
+  bool scanned_twice = false;
   ulong in_bytes, out_bytes;
-  if ((mark = nfct_get_attr_u32(mct, ATTR_MARK)) == 0)
-    {
-      //printf ("destroy nfmark 0 detected \n");
+  if ((mark = nfct_get_attr_u32(mct, ATTR_MARK)) == 0){
+    u_int32_t src_addr = nfct_get_attr_u32(mct, ATTR_ORIG_IPV4_SRC);
+    u_int32_t dst_addr = nfct_get_attr_u32(mct, ATTR_ORIG_IPV4_DST);
+    if (src_addr == dst_addr){
+      //This is assumed to be local traffic. This looks to be a safe assumption
+      //Ideally, we should query what our local interfaces are
       return NFCT_CB_CONTINUE;
     }
+    //addr is in BE byte order. If MSB == 127, we are dealing with loopback range
+    if ((src_addr & 0xFF) == 127 && (dst_addr & 0xFF) == 127){
+      return NFCT_CB_CONTINUE;
+    }
+    //TODO: find out if it is OK if some conntracks dont have a mark
+    //TODO check the conntracks timestamp
+    out_bytes = nfct_get_attr_u64(mct, ATTR_ORIG_COUNTER_BYTES);
+    in_bytes = nfct_get_attr_u64(mct, ATTR_REPL_COUNTER_BYTES);
+    if (in_bytes != 0 && out_bytes != 0){
+      printf ("Error: conntrack with nfmark 0 detected with leaked bytes \n");
+      cout << "src_addr: " << src_addr << "\n";
+      cout << "dst_addr: " << dst_addr << "\n";
+      //TODO figure out a long-term solution for this rare problem
+      //abort();
+    }
+    //else
+    return NFCT_CB_CONTINUE;
+  }
+  //orig/repl will be treated as in/out later depending on the direction
   out_bytes = nfct_get_attr_u64(mct, ATTR_ORIG_COUNTER_BYTES);
   in_bytes = nfct_get_attr_u64(mct, ATTR_REPL_COUNTER_BYTES);
 
-  int i;
-  for (i = 0; ct_array[i][0] != 0; ++i)
-    {
-      if (ct_array[i][0] != mark) continue;
-      ct_array[i][3] += in_bytes;
-      ct_array[i][4] += out_bytes;
-      return NFCT_CB_CONTINUE;
-    }
-  printf ("Error: there was a request to destroy nfmark which is not in the list \n");
-  return NFCT_CB_CONTINUE;
+scan_again:
+  pthread_mutex_lock ( &ct_entries_mutex);
+  for (i = 0; ct_array[i][0] != 0; ++i){
+    if (ct_array[i][0] != mark) continue;
+    ct_array[i][3] += in_bytes;
+    ct_array[i][4] += out_bytes;
+    pthread_mutex_unlock ( &ct_entries_mutex);
+    return NFCT_CB_CONTINUE;
+  }
+  pthread_mutex_unlock ( &ct_entries_mutex);
+  //We have a mark that is not yet in ct_array. Maybe the dump thread (which sleeps every second)
+  //hasn't added it yet. Give it another chance
+  if (!scanned_twice){
+    scanned_twice = true;
+    sleep(1);
+    cout << "************Scanning again in ct_destroy_cb \n";
+    goto scan_again;
+  }
+  cout << "Error: unknown nfmark in ct_destroy_cb even after scanning again: " << mark << "\n";
+  abort();
 }
 
+
+//Periodically dump all conntrack stats so we could tell the frontend
+//per-process how many bytes went in/out and were allowed/denied
 void * thread_ct_dump( void *ptr)
 {
   u_int8_t family = AF_INET;
-  struct nfct_handle *ct_dump_handle;
-  if ((ct_dump_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((nfct_callback_register(ct_dump_handle, NFCT_T_ALL, ct_dump_cb, NULL) == -1))
-    {
-      perror("cb_reg");
-    }
+  struct nfct_handle *ct_dump_handle = _nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
+  _nfct_callback_register(ct_dump_handle, NFCT_T_ALL, ct_dump_cb, NULL);
 
-
+  int i,j;
+  string export_string;
+  string prev_export_string;
   while(1){
-    //zero out from previous iteration
-    int i;
+    _pthread_mutex_lock(&ct_entries_mutex);
     for (i=0; i<CT_ENTRIES_EXPORT_MAX; ++i){
+      //zero out from previous iterations
       ct_array[i][1] = ct_array[i][2] = ct_array_export[i][0] = ct_array_export[i][1] =
 		  ct_array_export[i][2] = ct_array_export[i][3] = ct_array_export[i][4] = 0;
     }
     _pthread_mutex_lock(&ct_dump_mutex);
-    if (nfct_query(ct_dump_handle, NFCT_Q_DUMP, &family) == -1) perror("query-DELETE");
+    _nfct_query(ct_dump_handle, NFCT_Q_DUMP, &family);
+    //nfct_query blocks until dumping completes and ct_dump_cb returns
     _pthread_mutex_unlock(&ct_dump_mutex);
-//we get here only when dumping operation finishes and traffic_callback has created a new array of
-//conntrack entries
-    _pthread_mutex_lock(&ct_entries_mutex);
     for (i = 0; ct_array[i][0] != 0; ++i){
       ct_array[i][5] = ct_array[i][1]+ct_array[i][3];
       ct_array[i][6] = ct_array[i][2]+ct_array[i][4];
     }
     //rearrange array for export
-    int j;
     for (i=0; ct_array[i][0] != 0; ++i){
       for (j=0; ct_array_export[j][0] !=0; ++j) {
         //if this is an IN nfmark
@@ -392,53 +344,56 @@ void * thread_ct_dump( void *ptr)
         ct_array_export[j][3] = ct_array[i][7];
         ct_array_export[j][4] = ct_array[i][8];
       }
-  next:
-  ;
+    next:
+    ;
     }
-  _pthread_mutex_unlock(&ct_entries_mutex);
-  string export_string = "";
-  for (j=0; ct_array_export[j][0] !=0; ++j) {
-    export_string +=  std::to_string(ct_array_export[j][0]) + " " +
-        std::to_string(ct_array_export[j][1]) + " " +
-        std::to_string(ct_array_export[j][2]) + " " +
-        std::to_string(ct_array_export[j][3]) + " " +
-        std::to_string(ct_array_export[j][4]) + string(" CRLF ");
-  }
-  export_string += "EOL ";
-  ctmsgQueue = queue<string>(); //clear the queue
-  ctmsgQueue.push(export_string);
+    _pthread_mutex_unlock(&ct_entries_mutex);
+    export_string.clear();
+    for (j=0; ct_array_export[j][0] !=0; ++j) {
+      export_string +=  std::to_string(ct_array_export[j][0]) + " " +
+          std::to_string(ct_array_export[j][1]) + " " +
+          std::to_string(ct_array_export[j][2]) + " " +
+          std::to_string(ct_array_export[j][3]) + " " +
+          std::to_string(ct_array_export[j][4]) + string(" CRLF ");
+    }
+    export_string += "EOL ";
+    //Only send updates to frontend when stats changed
+    if ((export_string != prev_export_string) || (conntrack_send_anyway)){
+      ctmsgQueue = queue<string>(); //clear the queue
+      ctmsgQueue.push(export_string);
+      prev_export_string = export_string;
+      if (conntrack_send_anyway) {
+        cout << "toggling conntrack_send_anyway to false \n";
+        conntrack_send_anyway = false;}
+    }
   sleep(1);
-   }
+  }
 }
+
 
 void denied_traffic_add (const int direction, const int mark, const int bytes)
 {
   int i;
-    _pthread_mutex_lock ( &ct_entries_mutex);
-    for (i = 0; ct_array[i][0] != 0; ++i)
-      {
-	if (ct_array[i][0] != mark) continue;
-	if (direction == DIRECTION_OUT)
-	{
+  _pthread_mutex_lock ( &ct_entries_mutex);
+  for (i = 0; ct_array[i][0] != 0; ++i){
+    if (ct_array[i][0] != mark) continue;
+    if (direction == DIRECTION_OUT){
 	    ct_array[i][8] += bytes;
-	}
-	else if (direction == DIRECTION_IN)
-	{
-	    ct_array[i][7] += bytes;
-	}
-	_pthread_mutex_unlock ( &ct_entries_mutex);
-	return;
-      }
-    //the entry is not yet in array, adding now
-    ct_array[i][0] = mark;
-    if (direction == DIRECTION_OUT)
-    {
-	ct_array[i][8] += bytes;
     }
-    else if (direction == DIRECTION_IN)
-    {
-	ct_array[i][7] += bytes;
+    else if (direction == DIRECTION_IN){
+	    ct_array[i][7] += bytes;
     }
     _pthread_mutex_unlock ( &ct_entries_mutex);
-    return ;
+    return;
+  }
+  //the entry is not yet in array, adding now
+  ct_array[i][0] = mark;
+  if (direction == DIRECTION_OUT){
+    ct_array[i][8] += bytes;
+  }
+  else if (direction == DIRECTION_IN){
+    ct_array[i][7] += bytes;
+  }
+  _pthread_mutex_unlock ( &ct_entries_mutex);
+  return ;
 }

@@ -68,8 +68,10 @@ template <typename ... Varargs> int _munmap(Varargs ... varargs);
 //This is a hack. Templates can be included by multiple source file without causing an error
 template <typename string>
 int die_syscall(string message){
+  fprintf(stderr, "Error %d - %s\n", errno, strerror(errno));
   cout << message << "\n";
-  exit(1);
+  cout << "Dumping a core file. Make sure to sudo chmod 0777 it to make it user-readable \n";
+  abort(); //dump corefile - to get a decent backtrace via gcc
 }
 
 
@@ -97,6 +99,7 @@ template <typename ... Varargs>
 int _nfct_query(Varargs ... varargs) {
   int retval = nfct_query(varargs ...);
   if (retval == -1){
+    printf("nfct_query: %s,\n", strerror ( errno ));
     die_syscall ("nfct_query returned -1");
   }
   return retval;
@@ -107,6 +110,7 @@ template <typename ... Varargs>
 int _nfct_callback_register(Varargs ... varargs) {
   int retval = nfct_callback_register(varargs ...);
   if (retval == -1){
+    printf("nfct_callback_register: %s,\n", strerror ( errno ));
     die_syscall ("nfct_callback_register returned -1");
   }
   return retval;
@@ -218,6 +222,7 @@ template <typename ... Varargs>
 struct nf_conntrack* _nfct_new(Varargs ... varargs) {
   struct nf_conntrack* retval = nfct_new(varargs ...);
   if (retval == NULL){
+    printf("nfct_new: %s,\n", strerror ( errno ));
     die_syscall ("nfct_new returned NULL");
   }
   return retval;
@@ -228,6 +233,7 @@ template <typename ... Varargs>
 struct nfct_handle* _nfct_open(Varargs ... varargs) {
   struct nfct_handle* retval = nfct_open(varargs ...);
   if (retval == NULL){
+    printf("nfct_open: %s,\n", strerror ( errno ));
     die_syscall ("nfct_open returned NULL");
   }
   return retval;

@@ -105,7 +105,7 @@ void *
 sha256_read_ctx (const struct sha256_ctx *ctx, void *resbuf)
 {
   int i;
-  char *r = resbuf;
+  char *r = (char *)resbuf;
 
   for (i = 0; i < 8; i++)
     set_uint32 (r + i * sizeof ctx->state[0], SWAP (ctx->state[i]));
@@ -117,7 +117,7 @@ void *
 sha224_read_ctx (const struct sha256_ctx *ctx, void *resbuf)
 {
   int i;
-  char *r = resbuf;
+  char *r = (char *)resbuf;
 
   for (i = 0; i < 7; i++)
     set_uint32 (r + i * sizeof ctx->state[0], SWAP (ctx->state[i]));
@@ -177,7 +177,7 @@ sha256_stream (FILE *stream, void *resblock)
   struct sha256_ctx ctx;
   size_t sum;
 
-  char *buffer = malloc (BLOCKSIZE + 72);
+  char *buffer = (char *)malloc (BLOCKSIZE + 72);
   if (!buffer)
     return 1;
 
@@ -248,7 +248,7 @@ sha224_stream (FILE *stream, void *resblock)
   struct sha256_ctx ctx;
   size_t sum;
 
-  char *buffer = malloc (BLOCKSIZE + 72);
+  char *buffer = (char *)malloc (BLOCKSIZE + 72);
   if (!buffer)
     return 1;
 
@@ -447,7 +447,7 @@ static const uint32_t sha256_round_constants[64] = {
 void
 sha256_process_block (const void *buffer, size_t len, struct sha256_ctx *ctx)
 {
-  const uint32_t *words = buffer;
+  const uint32_t *words = (uint32_t *)buffer;
   size_t nwords = len / sizeof (uint32_t);
   const uint32_t *endp = words + nwords;
   uint32_t x[16];

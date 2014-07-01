@@ -1,0 +1,31 @@
+THE INFO BELOW IS FOR DEVELOPERS ONLY.
+
+There is no need to fear that your machine's internet will be locked up when testing.
+We use iptables' -m owner GID match specifically for testing.
+
+In one console start:
+sudo gdbserver host:2345 lpfw --test
+
+(If you like GUI you can then attach to the remote debugger from qtcreator's debug menu)
+Use sudo ./lpfw --test to start the test.
+Sometimes zombie testprocesses may block the nfqueue and give errors, use sudo pkill -f testprocess 
+
+---------------------------------------------------
+You can monitor in real-time how busy is nfqueue:
+watch -n 0.1 'sudo cat /proc/net/netfilter/nfnetlink_queue'
+
+For example:
+   40  23948     0 2 65531     0     0      106  1
+
+	queue number
+	peer portid: good chance it is process ID of software listening to the queue
+	queue total: number of queues if queue load balancing is used
+	copy mode: 0 and 1 only message only provide meta data. If 2 message provide a part of packet of size copy range.
+	copy range: length of packet data to put in message
+	queue dropped: number of packets dropped because queue was full
+	user dropped: number of packets dropped because netlink message could not be sent to userspace. If this counter is not zero, try to increase netlink buffer size. On the application side, you will see gap in packet id if netlink message are lost.
+	id sequence: packet id of last packet
+	1
+
+Pay special attention to queue total - it should not exceed 200, otherwise packets will be dropped and tests fail.
+---------------------------------------------------

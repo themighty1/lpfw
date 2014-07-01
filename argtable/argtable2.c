@@ -214,7 +214,7 @@ char* alloc_shortoptions(struct arg_hdr **table)
        len += 3 * (hdr->shortopts?strlen(hdr->shortopts):0);
        }
 
-   result = malloc(len);
+   result = (char *)malloc(len);
    if (result)
         {
         char *res = result;
@@ -944,10 +944,10 @@ void arg_print_glossary(FILE *fp, void **argtable, const char *format)
  * will result in the following output:
  *
  * Some
- *   text
- *   that
- *   doesn'
- *   t fit.
+ *   text
+ *   that
+ *   doesn'
+ *   t fit.
  *
  * As you see, the first line is not indented. This enables output of
  * lines, which start in a line where output already happened.
@@ -970,7 +970,7 @@ void arg_print_formatted( FILE *fp, const unsigned lmargin, const unsigned rmarg
         {
         /* Eat leading whitespaces. This is essential because while
            wrapping lines, there will often be a whitespace at beginning
-           of line  */
+           of line  */
         while ( isspace(*(text+line_start)) ) 
             { line_start++; }
 
@@ -1016,9 +1016,9 @@ void arg_print_formatted( FILE *fp, const unsigned lmargin, const unsigned rmarg
 /**
  * Prints the glossary in strict GNU format. 
  * Differences to arg_print_glossary() are:
- *  - wraps lines after 80 chars
- *  - indents lines without shortops
- *  - does not accept formatstrings
+ *  - wraps lines after 80 chars
+ *  - indents lines without shortops
+ *  - does not accept formatstrings
  *
  * Contributed by Uli Fouquet
  */
