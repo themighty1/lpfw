@@ -146,7 +146,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.actionShow_active_only.setEnabled(False)
         self.actionShow_all.setEnabled(True)
         self.actionShow_all.setChecked(False)
-
+     
     def showAll(self):
         self.model.toggle_mode_sig.emit('SHOW ALL')        
         self.actionShow_active_only.setEnabled(True)
@@ -308,8 +308,9 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
                 self.sourcemodel.item(j,5).setText(fields[2])
                 self.sourcemodel.item(j,6).setText(fields[3])
                 self.sourcemodel.item(j,7).setText(fields[4])
+                break
         self.sourcemodel.layoutChanged.emit()                    
-        modellock.release()        	
+        modellock.release()   
 
 
 
@@ -419,6 +420,7 @@ class myModel(QStandardItemModel):
     def layout_changed(self):
         self.layoutAboutToBeChanged.emit()
         self.layoutChanged.emit()
+
         
    
 class mySortFilterProxyModel(QSortFilterProxyModel):
@@ -433,8 +435,23 @@ class mySortFilterProxyModel(QSortFilterProxyModel):
     def toggle_mode(self, mode_in):
         mode = str(mode_in)
         self.mode = mode
-        self.sourceModel().layoutAboutToBeChanged.emit()
-        self.sourceModel().layoutChanged.emit()        
+        smodel = self.sourceModel()
+        smodel.layoutAboutToBeChanged.emit()
+        #Unfortunately, Qt messes up line numbers. We'll have to correct that
+        if self.mode == 'SHOW ACTIVE ONLY':
+            num = 1
+            for i in range(smodel.rowCount()):
+                if str(smodel.itemFromIndex(smodel.index(i,1)).text()) == 'N/A':
+                    continue
+                smodel.setHeaderData(i, Qt.Vertical, QVariant(num), Qt.DisplayRole)
+                num += 1
+        if self.mode == 'SHOW ALL':
+            for i in range(smodel.rowCount()):
+                smodel.setHeaderData(i, Qt.Vertical, QVariant(i+1), Qt.DisplayRole)
+        smodel.layoutChanged.emit()
+
+
+   
         
     def filterAcceptsRow(self, row, parent):
         if self.mode == 'SHOW ALL':
