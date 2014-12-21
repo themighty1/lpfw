@@ -40,6 +40,7 @@ class queryDialog(QDialog):
             text = 'is trying to connect to'
         if (direction == 'IN'):
             text = 'is being connected to from'
+        self.setWindowTitle("Leopard Flower firewall")
         self.label_text.setText(text)
         self.pushButton_allow.clicked.connect(self.allowClicked)
         self.pushButton_deny.clicked.connect(self.denyClicked)
@@ -130,6 +131,8 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
         QMainWindow.__init__(self)
         self.setupUi(self)
+        self.setWindowTitle("Leopard Flower firewall")
+        self.setWindowIcon(QIcon(":/pics/pic.jpg"))
         self.tableView.setShowGrid(False)
         self.menuRules.aboutToShow.connect(self.rulesMenuTriggered)
         self.menuRules.actions()[0].triggered.connect(self.deleteMenuTriggered)
@@ -318,10 +321,11 @@ class CustomDelegate (QStyledItemDelegate):
     def __init__ (self):
         QStyledItemDelegate.__init__(self)
     def paint (self, painter, option, index):
-        model = index.model().sourceModel()
-        item = QStandardItem()
-        item = model.item(index.row(), index.column())
-        text = item.text()
+        model = index.model()
+        item = model.data(index).toPyObject()
+        if item == None:
+            return
+        text = str(item)
         if (len(text) > 6):
             # take only megabytes -->12<--345678
             mb = text[:len(text)-6]
@@ -380,7 +384,7 @@ def communicationThread():
             time.sleep(1) 
             continue
 
-        print ('RECEIVED: ' + data)
+        #print ('RECEIVED: ' + data)
         messages = data.split('EOL')
         rules_list = ''
         request = ''
@@ -415,6 +419,9 @@ class myModel(QStandardItemModel):
     def __init__(self):
         QStandardItemModel.__init__(self)
         self.layout_changed_sig.connect(self.layout_changed)
+        self.setHorizontalHeaderLabels(("Name","Process ID","Permission",
+                                              "Full path","Allowed in","Allowed out",
+                                              "Denied in","Denied out"))
         
     @pyqtSlot()
     def layout_changed(self):
@@ -435,24 +442,16 @@ class mySortFilterProxyModel(QSortFilterProxyModel):
     def toggle_mode(self, mode_in):
         mode = str(mode_in)
         self.mode = mode
-        smodel = self.sourceModel()
-        smodel.layoutAboutToBeChanged.emit()
-        #Unfortunately, Qt messes up line numbers. We'll have to correct that
-        if self.mode == 'SHOW ACTIVE ONLY':
-            num = 1
-            for i in range(smodel.rowCount()):
-                if str(smodel.itemFromIndex(smodel.index(i,1)).text()) == 'N/A':
-                    continue
-                smodel.setHeaderData(i, Qt.Vertical, QVariant(num), Qt.DisplayRole)
-                num += 1
-        if self.mode == 'SHOW ALL':
-            for i in range(smodel.rowCount()):
-                smodel.setHeaderData(i, Qt.Vertical, QVariant(i+1), Qt.DisplayRole)
-        smodel.layoutChanged.emit()
+        self.sourceModel().layoutAboutToBeChanged.emit()
+        self.sourceModel().layoutChanged.emit() 
+       
 
+    def headerData(self, section, orientation, role):
+        if orientation != Qt.Vertical or role != Qt.DisplayRole:
+            return QSortFilterProxyModel.headerData(self, section, orientation, role)
+        return section+1
 
    
-        
     def filterAcceptsRow(self, row, parent):
         if self.mode == 'SHOW ALL':
             return True
@@ -464,10 +463,8 @@ class mySortFilterProxyModel(QSortFilterProxyModel):
         else:
             return True
         
-    #TODO can't figure out how to do this properly
-    #disabling for now
-    def lessThan_old(self, left, right):
-        print ('lessThan', left.column())
+
+    def lessThan(self, left, right):
         if left.column() not in (1,4,5,6,7):
             return QSortFilterProxyModel.lessThan(self, left, right)
         model = self.sourceModel()
@@ -479,7 +476,6 @@ class mySortFilterProxyModel(QSortFilterProxyModel):
             rightint = int(model.data(right).toPyObject())
         except:
             rightint = 0
-        print('comparing', leftint, rightint)
         return  leftint < rightint
 
 
@@ -498,13 +494,8 @@ if __name__ == "__main__":
     app=QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
     window = myMainWindow()
-    icon = QIcon(":/pics/pic.jpg")
-    icon2 = QIcon(":/pics/pic24.png")
-    window.setWindowIcon(icon)
-    window.setWindowTitle("Leopard Flower firewall")
-    window.show()
 
-    tray = QSystemTrayIcon(icon2)
+    tray = QSystemTrayIcon(QIcon(":/pics/pic24.png"))
     menu = QMenu()
     actionShow = QAction("Show Leopard Flower",menu)
     actionExit = QAction("Exit",menu)
@@ -515,18 +506,16 @@ if __name__ == "__main__":
     actionShow.triggered.connect(window.show)
     actionExit.triggered.connect(window.realQuit)
 
-    sourcemodel = myModel()
-    sourcemodel.setHorizontalHeaderLabels(("Name","Process ID","Permission",
-                                        "Full path","Allowed in","Allowed out",
-                                        "Denied in","Denied out"))
-   
+    sourcemodel = myModel()  
     model = mySortFilterProxyModel()
     model.setSourceModel(sourcemodel)
-    #enable sorting again when lessThan is fixed
-    #window.tableView.setSortingEnabled(True)
+    model.setDynamicSortFilter(True)
+
+    window.tableView.setSortingEnabled(True)
     window.tableView.setModel(model)
     window.model = model
     window.sourcemodel = sourcemodel
+
     delegate = CustomDelegate()    
     window.tableView.setItemDelegateForColumn(4,delegate)
     window.tableView.setItemDelegateForColumn(5,delegate)
@@ -534,9 +523,7 @@ if __name__ == "__main__":
     window.tableView.setItemDelegateForColumn(7,delegate)
 
     dialogOut = myDialogOut()
-    dialogOut.setWindowTitle("Leopard Flower firewall")
     dialogIn = myDialogIn()
-    dialogIn.setWindowTitle("Leopard Flower firewall")
 
     thread = threading.Thread(target= communicationThread)
     thread.daemon = True
@@ -544,4 +531,6 @@ if __name__ == "__main__":
     thread = threading.Thread(target= conntrackThread)
     thread.daemon = True
     thread.start()
+
+    window.show()
     sys.exit(app.exec_())
