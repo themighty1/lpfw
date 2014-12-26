@@ -274,7 +274,8 @@ scan_again:
     goto scan_again;
   }
   cout << "Error: unknown nfmark in ct_destroy_cb even after scanning again: " << mark << "\n";
-  abort();
+  return NFCT_CB_CONTINUE;
+  //TODO this error should be logged with a dump and analyzed
 }
 
 
