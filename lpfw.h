@@ -17,7 +17,7 @@ extern pthread_mutex_t logstring_mutex;
 extern char logstring[PATHSIZE];
 
 //add a new rule and if ctmark is not specified, return a new ctmark for the newly added rule
-int ruleslist_add ( const char *path, const char *pid, const char *perms, const mbool current, const char *sha,
+int ruleslist_add ( const char *path, const char *pid, const char *perms, const bool current, const char *sha,
     const unsigned long long stime, const off_t size, const int ctmark, const unsigned char first_instance );
 
 //remove rule from ruleslist
