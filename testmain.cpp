@@ -787,7 +787,7 @@ void *udp_server (void *ptr){
   char buf[1000];
   int i = 0;
   struct sockaddr_in clientaddr; /* client addr */
-  int clientlen; /* byte size of client's address */
+  socklen_t clientlen; /* byte size of client's address */
   clientlen = sizeof(clientaddr);
 
   while (true){

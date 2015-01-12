@@ -2093,7 +2093,7 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
     //Investigate if attacker can give a fake src addr
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
     _pthread_mutex_unlock(&nfq_handle_mutex);
-    return;
+    return 0;
   }
 
   int verdict;
@@ -2152,7 +2152,7 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
     cout << "unknown protocol, dropping packet " << proto << "\n";
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
     _pthread_mutex_unlock(&nfq_handle_mutex);
-    return;
+    return 0;
   }
 
   //Knowing only the local port, find full path of the process

@@ -518,7 +518,7 @@ int arg_parse(int argc, char **argv, void **argtable)
         return endtable->count;
         }
 
-    argvcopy = malloc(sizeof(char *) * argc);
+    argvcopy = (char **) malloc(sizeof(char *) * argc);
     if (argvcopy)
         {
         int i;
@@ -756,9 +756,9 @@ static
 void arg_print_gnuswitch(FILE *fp, struct arg_hdr **table)
     {
     int tabindex;
-    char *format1=" -%c";
-    char *format2=" [-%c";
-    char *suffix="";
+    char *format1=(char *)" -%c";
+    char *format2=(char *)" [-%c";
+    char *suffix=(char *)"";
 
     /* print all mandatory switches that are without argument values */
     for(tabindex=0; table[tabindex] && !(table[tabindex]->flag&ARG_TERMINATOR); tabindex++)
@@ -777,8 +777,8 @@ void arg_print_gnuswitch(FILE *fp, struct arg_hdr **table)
 
         /* print the short option (only the first short option char, ignore multiple choices)*/
         fprintf(fp,format1,table[tabindex]->shortopts[0]);
-        format1="%c";
-        format2="[%c";
+        format1=(char *)"%c";
+        format2=(char *)"[%c";
         }
 
     /* print all optional switches that are without argument values */
@@ -798,8 +798,8 @@ void arg_print_gnuswitch(FILE *fp, struct arg_hdr **table)
 
         /* print first short option */
         fprintf(fp,format2,table[tabindex]->shortopts[0]);
-        format2="%c";
-        suffix="]";
+        format2=(char *)"%c";
+        suffix=(char *)"]";
         }
 
     fprintf(fp,"%s",suffix);

@@ -64,7 +64,7 @@ ulong ct_array_export[CT_ENTRIES_EXPORT_MAX][5] = {};
 void * thread_ct_destroy( void *ptr)
 {
   struct nfct_handle *traffic_handle = _nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY);
-  _nfct_callback_register(traffic_handle, NFCT_T_DESTROY, ct_destroy_cb, NULL);
+  _nfct_callback_register(traffic_handle, NFCT_T_DESTROY, ct_destroy_cb, (void *)NULL);
   nfct_catch(traffic_handle); //the thread should block here
 }
 
@@ -75,7 +75,7 @@ void* thread_ct_delete_mark ( void* ptr )
 {
   u_int8_t family = AF_INET;
   struct nfct_handle *deletemark_handle = _nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
-  _nfct_callback_register(deletemark_handle, NFCT_T_ALL, ct_delete_mark_cb, NULL);
+  _nfct_callback_register(deletemark_handle, NFCT_T_ALL, ct_delete_mark_cb, (void *)NULL);
 
   while(1){
     _pthread_mutex_lock(&condvar_mutex);
@@ -112,7 +112,7 @@ void init_conntrack(){
   _nfct_query (handle_flush, NFCT_Q_FLUSH, &family);
   //register a callback which nfq_handler will call to set netfilter marks on connection
   setmark_handle = _nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
-   _nfct_callback_register (setmark_handle, NFCT_T_ALL, setmark, NULL);
+   _nfct_callback_register (setmark_handle, NFCT_T_ALL, setmark, (void *)NULL);
 
   _pthread_create ( &tcp_export_thr, (pthread_attr_t *)NULL, tcp_export_thread, (void *)NULL);
   _pthread_create ( &ct_dump_thr, (pthread_attr_t *)NULL, thread_ct_dump, (void *)NULL );
@@ -285,7 +285,7 @@ void * thread_ct_dump( void *ptr)
 {
   u_int8_t family = AF_INET;
   struct nfct_handle *ct_dump_handle = _nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
-  _nfct_callback_register(ct_dump_handle, NFCT_T_ALL, ct_dump_cb, NULL);
+  _nfct_callback_register(ct_dump_handle, NFCT_T_ALL, ct_dump_cb, (void *)NULL);
 
   int i,j;
   string export_string;

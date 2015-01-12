@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
+#include <libnetfilter_conntrack/libnetfilter_conntrack.h>
 #include <pthread.h>
 #include <sys/capability.h>
 #include <dirent.h>
