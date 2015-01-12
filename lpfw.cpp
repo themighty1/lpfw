@@ -979,23 +979,86 @@ void rules_load(){
   ifstream inputFile(rules_file->filename[0]);
   string line;
   int pos;
+  bool is_full_path_found = false;
+  bool is_permission_found = false;
+  bool is_sha256_hexdigest_found = false;
+  bool is_netfilter_mark_found = false;
+  string full_path = "";
+  string permission = "";
+  string sha256_hexdigest = "";
+  int netfilter_mark = 0;
+
   while (getline(inputFile, line))
   {
-    rule newrule;
-    if ((pos = line.find(" ")) == string::npos) return; //empty rules file
-    newrule.path = line.substr(0, pos);
-    line.erase(0, pos + 1);
-    if ((pos = line.find(" ")) == string::npos) die();
-    newrule.perms = line.substr(0, pos);
-    line.erase(0, pos + 1);
-    newrule.sha = line.substr(0, line.length());
-    newrule.pid = "0";
-    newrule.is_active = false;
-    newrule.stime = 0;
-    newrule.first_instance = true;
-    newrule.nfmark_out = 0;
-    newrule.nfmark_in = 0;
-    rules.push_back(newrule);
+    if (line[0] == '#') continue;
+    if (line == ""){
+      if (is_full_path_found && is_permission_found && is_sha256_hexdigest_found){
+        //the end of the rule parameters
+        rule newrule;
+        newrule.path = full_path;
+        newrule.perms = permission;
+        newrule.sha = sha256_hexdigest;
+        newrule.pid = "0";
+        newrule.is_active = false;
+        newrule.stime = 0;
+        newrule.first_instance = true;
+        newrule.nfmark_out = 0;
+        newrule.nfmark_in = 0;
+        if (is_netfilter_mark_found){
+          newrule.nfmark_out = netfilter_mark;
+          newrule.nfmark_in = netfilter_mark+NFMARK_DELTA;
+          newrule.is_fixed_nfmark = true;
+        }
+        rules.push_back(newrule);
+        is_full_path_found = false;
+        is_permission_found = false;
+        is_sha256_hexdigest_found = false;
+        is_netfilter_mark_found = false;
+        full_path = "";
+        permission = "";
+        sha256_hexdigest = "";
+        netfilter_mark = 0;
+      }
+      continue;
+    }
+    if ((pos = line.find(" ")) == string::npos) return; //TODO should throw?
+    //mandatory parameters
+    if (!is_full_path_found){
+      if (line.substr(0,11) != "full_path= ") return; //TODO should throw?
+      //trim leading spaces
+      line = line.substr(pos, string::npos);
+      line = line.substr( line.find_first_not_of(" "), string::npos);
+      full_path = line;
+      is_full_path_found = true;
+      continue;
+    }
+    if (!is_permission_found){
+      if (line.substr(0,12) != "permission= ") return; //TODO should throw?
+      //trim leading spaces
+      line = line.substr(pos, string::npos);
+      line = line.substr( line.find_first_not_of(" "), string::npos);
+      permission = line;
+      is_permission_found = true;
+      continue;
+    }
+    if (!is_sha256_hexdigest_found){
+      if (line.substr(0,18) != "sha256_hexdigest= ") return; //TODO should throw?
+      //trim leading spaces
+      line = line.substr(pos, string::npos);
+      line = line.substr( line.find_first_not_of(" "), string::npos);
+      sha256_hexdigest = line;
+      is_sha256_hexdigest_found = true;
+      continue;
+    }
+    if (!is_netfilter_mark_found){
+      if (line.substr(0,16) != "netfilter_mark= ") return; //TODO should throw?
+      //trim leading spaces
+      line = line.substr(pos, string::npos);
+      line = line.substr( line.find_first_not_of(" "), string::npos);
+      netfilter_mark = std::stoi(line);
+      is_netfilter_mark_found = true;
+      continue;
+    }
   }
   inputFile.close();
 }
@@ -1026,10 +1089,45 @@ void rules_write(bool mutex_being_held){
     }
   }
   //write rules
-  string string_to_write;
+  string string_to_write =
+      "\n"
+      "# Leopard Flower personal firewall rules list\n"
+      "# lines startng with # are comments and will be ignored\n"
+      "# blank line is used to separate individual rules\n"
+      "# (Each parameter must have one or more spaces after the = sign and terminate with a newline)\n"
+      "\n"
+      "# Mandatory parameters (strictly in this order):\n"
+      "# full_path= followed by the full path to the executable\n"
+      "# permission= followed by either ALLOW_ALWAYS or DENY_ALWAYS\n"
+      "# sha256_hexdigest= followed by sha256 UPPERCASE hexdigest with any leading zeroes\n"
+      "# Optional parameters:\n"
+      "# netfilter_mark= followed by an integer\n"
+      "# (netfilter_mark can be manually assigned by the user in this file. This will enable the user\n"
+      "# to create more complex netfilter rules for the application, e.g. rate-limiting, IP/port blocking etc\n"
+      "# netfilter_mark set here will be used for outgoing traffic\n"
+      "# for incoming traffic netfilter_mark+10000 will be used)\n"
+      "\n"
+      "# Make sure there is a blank line at the end of this file\n"
+      "\n"
+      "# Example rules list:\n"
+      "# full_path=        /home/myusername/app1\n"
+      "# permission=       ALLOW_ALWAYS\n"
+      "# sha256_hexdigest= 3719407990275C319C882786125B1F148CC163FA3BF4C7712092034BBA06CE4D\n"
+      "# netfilter_mark=   11443\n"
+      "\n"
+      "# full_path=        /home/myusername/app2\n"
+      "# permission=       ALLOW_ALWAYS\n"
+      "# sha256_hexdigest= 9AF0F74366D0B3D1415AB6DF5D7E2429BF5CB5AC901B5ECFCC3DD51DA4B83D75\n"
+      "\n";
+
   for(i = 0; i < rulescopy.size(); i++){
-    string_to_write += rulescopy[i].path + " " + rulescopy[i].perms
-                    + " " + rulescopy[i].sha + "\n";
+    string_to_write += "full_path=        " + rulescopy[i].path + "\n";
+    string_to_write += "permission=       " + rulescopy[i].perms + "\n";
+    string_to_write += "sha256_hexdigest= " + rulescopy[i].sha + "\n";
+    if (rulescopy[i].is_fixed_nfmark){
+      string_to_write += "netfilter_mark=   " + to_string(rulescopy[i].nfmark_out) + "\n";
+    }
+    string_to_write += "\n";
   }
   ofstream myfile(rules_file->filename[0]);
   myfile << string_to_write;
@@ -1079,9 +1177,11 @@ int path_find_in_rules ( int &nfmark_out, const string path_in,
       DIR *dirstream = opendir(rules[i].pidfdpath.c_str());
       //if the app immediately terminated we may get NULL
       if (dirstream != NULL) rules[i].dirstream = dirstream;
-      vector<u_int32_t>nfmarks = get_nfmarks();
-      rules[i].nfmark_in = nfmarks[0];
-      rules[i].nfmark_out = nfmarks[1];
+      if (! rules[i].is_fixed_nfmark){
+        vector<u_int32_t>nfmarks = get_nfmarks();
+        rules[i].nfmark_in = nfmarks[0];
+        rules[i].nfmark_out = nfmarks[1];
+      }
       if (going_out) nfmark_out = rules[i].nfmark_out;
       else nfmark_out = rules[i].nfmark_in;
       _pthread_mutex_unlock ( &rules_mutex );
@@ -2716,6 +2816,10 @@ int main ( int argc, char *argv[] )
   if (test->count == 1) bTestingMode = true;
   init_log();
   pidfile_check();
+  if (!bTestingMode) {
+    rules_load();
+  }
+  open_proc_net_files();
 
   capabilities_modify(CAP_NET_ADMIN, CAP_EFFECTIVE, CAP_SET);
   init_conntrack();
@@ -2724,10 +2828,6 @@ int main ( int argc, char *argv[] )
   capabilities_modify(CAP_SYS_PTRACE, CAP_EFFECTIVE, CAP_SET);
   init_nfqueue();
 
-  if (!bTestingMode) {
-    rules_load();
-  }
-  open_proc_net_files();
   _pthread_create ( &refresh_thr, (pthread_attr_t *)NULL, thread_refresh, (void *)NULL );
   _pthread_create ( &cache_build_thr, (pthread_attr_t *)NULL, thread_build_pid_and_socket_cache, (void *)NULL);
   _pthread_create ( &tcp_server_thr, (pthread_attr_t *)NULL, thread_tcp_server,(void *)NULL);
