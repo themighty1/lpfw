@@ -24,15 +24,17 @@ endif
 
 all: lpfw testprocess
 
-lpfw: sha256.o conntrack.o testmain.o \
+lpfw: sha256.o base64.o conntrack.o testmain.o \
       argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
       lpfw.cpp lpfw.h common/defines.h common/includes.h
-	g++ $(g++FLAGS) sha256.o conntrack.o testmain.o \
+	g++ $(g++FLAGS) sha256.o base64.o conntrack.o testmain.o \
 	    argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
 	    lpfw.cpp -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
 sha256.o : sha256/sha256.c sha256/sha256.h sha256/u64.h
 	g++ $(g++FLAGS) -c sha256/sha256.c
+base64.o : base64.cpp base64.h
+	g++ $(g++FLAGS) -c base64.cpp
 conntrack.o : conntrack.c conntrack.h
 	g++ $(g++FLAGS) -c conntrack.c
 argtable2.o : argtable/argtable2.c

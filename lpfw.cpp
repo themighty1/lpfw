@@ -48,6 +48,7 @@
 #include "common/syscall_wrappers.h"
 #include "conntrack.h"
 #include "sha256/sha256.h"
+#include "base64.h"
 
 using namespace std;
 
@@ -797,8 +798,9 @@ void tcp_server_process_messages(int newsockfd) {
       conntrack_send_anyway = true;
     }
     else if (comm == "DELETE"){ // comm path
-      cout << "backend deleting " << string_parts.at(1) << "\n";
-      ruleslist_delete_all(string_parts.at(1));
+      string path = base64_decode(string_parts[1]);
+      cout << "backend deleting " << path << "\n";
+      ruleslist_delete_all(path);
     }
     else if (comm == "WRITE"){ //Not in use
       rules_write();
@@ -806,21 +808,22 @@ void tcp_server_process_messages(int newsockfd) {
     else if (comm == "ADD"){ //ADD path pid perms
       cout << "ADDing a rule \n";
       if (!awaiting_reply_from_fe) die();
-      string path = string_parts[1];
+      string path = base64_decode(string_parts[1]);
       string pid = string_parts[2];
       string perms = string_parts[3];
-      if (sent_path != path || sent_pid != pid) die();
+      if (sent_path != string_parts[1] || sent_pid != pid){
+        die("Expected " + sent_path + " but got " + path);}
       if (perms == "IGNORED") set_awaiting_reply_from_fe(false);
       else if (path == "KERNEL_PROCESS"){
         ruleslist_add(KERNEL_PROCESS, pid, perms, TRUE, "", 0, 0 ,TRUE);
       }
       else {
-        string procpath = "/proc/" + sent_pid + "/exe";
+        string procpath = "/proc/" + pid + "/exe";
         char exepathbuf[PATHSIZE];
         string sha;
         memset ( exepathbuf, 0, PATHSIZE );
         readlink (procpath.c_str(), exepathbuf, PATHSIZE-1 );
-        if (exepathbuf != sent_path){
+        if (exepathbuf != path){
           cout << "Frontend asked to add a process that is no longer running \n";
           set_awaiting_reply_from_fe(false);
           continue;
@@ -834,7 +837,7 @@ void tcp_server_process_messages(int newsockfd) {
 //           awaiting_reply_from_fe = FALSE;
 //         }
        //TODO SECURITY.Check that /proc/PID inode wasn't changed while we were shasumming and exesizing
-       ruleslist_add(sent_path, sent_pid, perms, true, "", atoi(sent_stime.c_str()), 0 ,TRUE);
+       ruleslist_add(path, pid, perms, true, "", atoi(sent_stime.c_str()), 0 ,TRUE);
        set_awaiting_reply_from_fe(false);
        requestQueue = queue<string>(); //clear the queue
        send_rules();
@@ -2034,7 +2037,9 @@ int send_request (const string path, const string pid, const string starttime,
   string req;
   if (direction == DIRECTION_OUT) {req = "REQUEST_OUT ";}
   else if (direction == DIRECTION_IN) {req = "REQUEST_IN ";}
-  requestQueue.push(req + path + " " + pid + " " + starttime +
+  string b64path = base64_encode(
+            reinterpret_cast<const unsigned char*>(path.c_str()), path.length());
+  requestQueue.push(req + b64path + " " + pid + " " + starttime +
                   " " + raddr + " " + rport + " " + lport + " EOL ");
   return SENT_TO_FRONTEND;
 }
@@ -2045,7 +2050,9 @@ int send_rules() {
   string message = "RULES_LIST ";
   for(int k=0; k < rules.size(); k++){
     string is_active = rules[k].is_active ? "TRUE": "FALSE";
-    message += rules[k].path + " " + rules[k].pid + " " + rules[k].perms + " "
+    string b64path = base64_encode(
+          reinterpret_cast<const unsigned char*>(rules[k].path.c_str()), rules[k].path.length());
+    message += b64path + " " + rules[k].pid + " " + rules[k].perms + " "
         + is_active + " " + to_string(rules[k].nfmark_out) + " CRLF ";
   }
   message += " EOL ";

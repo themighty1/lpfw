@@ -1,9 +1,10 @@
 import sys, os, thread, time, string, threading, subprocess
 from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator, QStyledItemDelegate, QPainter, QStyleOptionViewItem, QFont, QTableWidgetItem, QPalette, QColor, QSortFilterProxyModel
 import resource
-from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex, QRect, pyqtSlot, QVariant
+from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex, QRect, pyqtSlot, QVariant, QString
 from PyQt4.QtNetwork import QHostInfo
 from multiprocessing import Pipe, Process, Lock
+from base64 import b64encode, b64decode
 import socket
 import Queue
 import resource_rc
@@ -72,27 +73,27 @@ class queryDialog(QDialog):
     def escapePressed(self):
         "in case when user pressed Escape"
         print "in escapePressed"
-        msgQueue.put('ADD ' + self.path + ' ' + self.pid + ' IGNORED')
+        msgQueue.put('ADD ' + b64encode(bytearray(self.path, encoding='utf-8')) + ' ' + self.pid + ' IGNORED')
 
 
     def closeEvent(self, event):
         "in case when user closed the dialog without pressing allow or deny"
         print "in closeEvent"
-        msgQueue.put('ADD ' + self.path + ' ' + self.pid + ' IGNORED')
+        msgQueue.put('ADD ' + b64encode(bytearray(self.path, encoding='utf-8')) + ' ' + self.pid + ' IGNORED')
 
 
     def allowClicked(self):
         print "allow clicked"
         if (self.checkBox.isChecked()): verdict = "ALLOW_ALWAYS"
         else: verdict = "ALLOW_ONCE"     
-        msgQueue.put('ADD ' + self.path + ' ' + self.pid + ' ' + verdict)
+        msgQueue.put('ADD ' + b64encode(bytearray(self.path, encoding='utf-8')) + ' ' + self.pid + ' ' + verdict)
 
 
     def denyClicked(self):
         print "deny clicked"
         if (self.checkBox.isChecked()): verdict = "DENY_ALWAYS"
         else: verdict = "DENY_ONCE"     
-        msgQueue.put('ADD ' + self.path + ' ' + self.pid + ' ' + verdict)
+        msgQueue.put('ADD ' + b64encode(bytearray(self.path, encoding='utf-8')) + ' ' + self.pid + ' ' + verdict)
 
 
     def dialogFinished(self):
@@ -121,7 +122,7 @@ class myDialogIn(queryDialog, Ui_Dialog):
 
 
 class myMainWindow(QMainWindow, Ui_MainWindow):
-    askusersig = pyqtSignal(str, str, str, str, str, str) #connected to askUserOUT
+    askusersig = pyqtSignal(str, unicode, str, str, str, str) #connected to askUserOUT
     refreshmodelsig = pyqtSignal(str)
     update_bytestatssig = pyqtSignal(str)
     prevstats = ''
@@ -162,7 +163,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         print "In askUser"
         #Convert all incoming QString into normal python strings
         req_str = str(req_str_in)
-        path = str(path_in)
+        path = unicode(QString.fromUtf8(path_in))
         pid = str(pid_in)
         addr = str(addr_in)
         dport = str(dport_in)
@@ -179,10 +180,10 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         name = string.rsplit(path,"/",1)
         dialog.path = path
         dialog.pid = pid
-        dialog.label_name.setText(unicode(name[1], "utf-8"))
+        dialog.label_name.setText(name[1])
         dialog.label_ip.setText(addr)
-        dialog.label_domain.setText("Looking up DNS...")
-        fullpath = QTableWidgetItem(unicode(path, "utf-8"))
+        dialog.label_domain.setText("Looking up DNS...")        
+        fullpath = QTableWidgetItem(unicode(QString.fromUtf8(path)))
         dialog.tableWidget_details.setItem(0,1,fullpath)
         pid_item = QTableWidgetItem(pid)
         dialog.tableWidget_details.setItem(1,1,pid_item)
@@ -215,13 +216,13 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         bFound = False
         for index in selected_indexes:
             if index.column() != 3: continue
-            path = str(index.data().toPyObject())
+            path = unicode(index.data().toPyObject())
             bFound = True
             break
         if not bFound:
             print 'Could not find the path to delete'
             return
-        msgQueue.put('DELETE ' + path)    
+        msgQueue.put('DELETE ' + b64encode(bytearray(path, encoding='utf-8')))
     
 
     def closeEvent(self, event):
@@ -235,10 +236,10 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         time.sleep(2) #allow queue to be processed
         exit(1)
 
-    @pyqtSlot(str)
+    @pyqtSlot(unicode)
     def refreshmodel(self, data_in):  
         "Fill the frontend with rules data"
-        rawstr = str(data_in)
+        rawstr = unicode(QString.fromUtf8(data_in))
 
         export_list = []            
         rules = rawstr[len('RULES_LIST'):].split('CRLF')
@@ -259,7 +260,8 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             modellock.release()
             return
         for item in ruleslist[0:-1]:#leave out the last EOF from iteration
-            fullpath = QStandardItem(unicode(item[0], "utf-8"))
+            path_u = b64decode(item[0]).decode('utf-8')
+            fullpath = QStandardItem(path_u)
             #item[4] contains nfmark
             fullpath.setData(item[4])
             if (item[1] == "0"):
@@ -269,9 +271,9 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             pid = QStandardItem(pid_string)
             perms = QStandardItem(item[2])
             #only the name of the executable after the last /
-            m_list = string.rsplit(item[0],"/",1)
+            m_list = string.rsplit(path_u,"/",1)
             m_name = m_list[1]
-            name = QStandardItem(unicode(m_name, "utf-8"))
+            name = QStandardItem(m_name)
             in_allow_traf = QStandardItem()
             out_allow_traf = QStandardItem()
             in_deny_traf = QStandardItem()
@@ -372,7 +374,7 @@ def communicationThread():
             if send_data == '': 
                 raise Exception ('no data to send')
             print ('Sending:', send_data)
-            sock.send(send_data)
+            sock.send(bytearray(send_data, encoding='utf-8'))
         except: 
             pass #no data in msgQueue
         data = ''
@@ -405,7 +407,7 @@ def communicationThread():
         if (request):
             split_request = request.split()
             req_str = split_request[0]
-            path = split_request[1]
+            path = b64decode(split_request[1])
             pid = split_request[2]
             addr = split_request[4]
             dport = split_request[5]
