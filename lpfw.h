@@ -16,9 +16,9 @@ extern int (*m_printf)(const int loglevel, const char *logstring);
 extern pthread_mutex_t logstring_mutex;
 extern char logstring[PATHSIZE];
 
-//add a new rule and if nfmark is not specified, return a new nfmark for the newly added rule
+//add a new rule and if ctmark is not specified, return a new ctmark for the newly added rule
 int ruleslist_add ( const char *path, const char *pid, const char *perms, const mbool current, const char *sha,
-		const unsigned long long stime, const off_t size, const int nfmark, const unsigned char first_instance );
+    const unsigned long long stime, const off_t size, const int ctmark, const unsigned char first_instance );
 
 //remove rule from ruleslist
 void ruleslist_delete_one ( const char *path, const char *pid );
@@ -40,9 +40,9 @@ int m_printf_stdout ( const int loglevel, const char * logstring );
 int m_printf_file ( const int loglevel, const char * logstring );
 int m_printf_syslog (const int loglevel, const char * logstring);
 
-//find socket in pid_and_socket cache of active rules only and return path,pid,nfmark if found
+//find socket in pid_and_socket cache of active rules only and return path,pid,ctmark if found
 int search_pid_and_socket_cache(const long socket_in, string &path_out,
-                                    string &pid_out, int &nfmark_out);
+                                    string &pid_out, int &ctmark_out);
 //build a correlation of pid to socket of only the active rules, excluding inkernel rules
 void* thread_build_pid_and_socket_cache ( void *ptr );
 
@@ -58,14 +58,14 @@ void* thread_nfq_out ( void *ptr );
 //handlers for NFQUEUE traffic
 int  nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata );
 
-//find the process which owns the socket and return nfmark,path,pid,stime, otherwise SOCKET_NOT_FOUND_IN_PROCPIDFD
-int socket_handle ( const long *socket, int *nfmark_to_set, char *path, char *pid, u_int64_t *stime);
+//find the process which owns the socket and return ctmark,path,pid,stime, otherwise SOCKET_NOT_FOUND_IN_PROCPIDFD
+int socket_handle ( const long *socket, int *ctmark_to_set, char *path, char *pid, u_int64_t *stime);
 
 //determine if port belongs to a in-kernel process. Kernel modules can open sockets but the have no PID
 int inkernel_check_udp(const int port);
 int inkernel_check(const int port, const int proto);
 //if in-kernel socket found, see if there is a rule for it already
-int inkernel_get_verdict(const char *ipaddr_in, int &nfmark_out);
+int inkernel_get_verdict(const char *ipaddr_in, int &ctmark_out);
 
 //SET/CLEAR capability of a set
 void capabilities_modify(const int capability, const int set, const int action);
@@ -83,11 +83,11 @@ void rules_write(bool mutex_being_held = false);
 void add_to_rulesfile( const char *executable);
 
 //chack if path+pid combo is already in ruleslist
-int path_find_in_rules (int &nfmark_out, const string path_in,
+int path_find_in_rules (int &ctmark_out, const string path_in,
                             const string pid_in, unsigned long long stime_in, bool going_out);
 
 //search socket in /proc/<PID>/fd of the active rules
-int socket_active_processes_search (const long mysocket_in, string &m_path_out, string &m_pid_out, int &nfmark_out);
+int socket_active_processes_search (const long mysocket_in, string &m_path_out, string &m_pid_out, int &ctmark_out);
 
 //search socket in the whole of /proc/<PID>s
 int socket_procpidfd_search (const long mysocket_in, char *m_path_out, char *m_pid_out, u_int64_t stime_out );

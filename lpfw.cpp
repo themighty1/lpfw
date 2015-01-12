@@ -102,7 +102,7 @@ int tcp_port_and_socket_cache[MEMBUF_SIZE], udp_port_and_socket_cache[MEMBUF_SIZ
 tcp6_port_and_socket_cache[MEMBUF_SIZE], udp6_port_and_socket_cache[MEMBUF_SIZE];
 bool awaiting_reply_from_fe = false; //true when expecting a reply from frontend
 bool bTestingMode = false;
-int nfmark_to_set;
+int ctmark_to_set;
 extern struct nfct_handle *setmark_handle;
 bool conntrack_send_anyway = false; //used to tell ct thread to send stats even if there
 //was no recent update. Useful when frontend started mid-way and needs ct stats
@@ -164,18 +164,18 @@ void die(string message = ""){
   //print_trace();
 }
 
-//return 2 nfmarks: input and output
-vector<u_int32_t> get_nfmarks(){
-  //netfilter mark number for the packet (to be summed with NF_MARK_BASE)
-  static u_int32_t nfmark_count = 0;
-  static pthread_mutex_t nfmark_mutex = PTHREAD_MUTEX_INITIALIZER;
-  _pthread_mutex_lock ( &nfmark_mutex );
-  ++nfmark_count;
-  vector<u_int32_t>nfmarks;
-  nfmarks.push_back(NFMARKIN_BASE + nfmark_count);
-  nfmarks.push_back(NFMARKOUT_BASE + nfmark_count);
-  _pthread_mutex_unlock ( &nfmark_mutex );
-  return nfmarks;
+//return 2 conntrack marks: input and output
+vector<u_int32_t> get_ctmarks(){
+  //conntrack mark number for the packet (to be summed with CT_MARK_BASE)
+  static u_int32_t ctmark_count = 0;
+  static pthread_mutex_t ctmark_mutex = PTHREAD_MUTEX_INITIALIZER;
+  _pthread_mutex_lock ( &ctmark_mutex );
+  ++ctmark_count;
+  vector<u_int32_t>ctmarks;
+  ctmarks.push_back(CTMARKIN_BASE + ctmark_count);
+  ctmarks.push_back(CTMARKOUT_BASE + ctmark_count);
+  _pthread_mutex_unlock ( &ctmark_mutex );
+  return ctmarks;
 }
 
 
@@ -481,8 +481,8 @@ unsigned long long starttimeGet ( const int mypid ) {
 
 int ruleslist_add( const string path, const string pid, const string perms,
                    const bool active, const string sha, const unsigned long long stime,
-                   const int nfmark, const bool first_instance){
-  int retnfmark;
+                   const int ctmark, const bool first_instance){
+  int retctmark;
   int i;
   _pthread_mutex_lock ( &rules_mutex );
   if (path == KERNEL_PROCESS) {
@@ -516,20 +516,20 @@ int ruleslist_add( const string path, const string pid, const string perms,
   //rules added by frontend dont have their sha
   if (sha == "") { newrule.sha = get_sha256_hexdigest(path); }
   else { newrule.sha = sha; }
-  if (nfmark == 0) {
-    vector<u_int32_t>nfmarks = get_nfmarks();
-    newrule.nfmark_in = nfmarks[0];
-    retnfmark = newrule.nfmark_out = nfmarks[1];
+  if (ctmark == 0) {
+    vector<u_int32_t>ctmarks = get_ctmarks();
+    newrule.ctmark_in = ctmarks[0];
+    retctmark = newrule.ctmark_out = ctmarks[1];
   }
-  else { // nfmark > 0 => assign parent's nfmark
-    //either nfmark is for in or out traffic
-    if (nfmark >= NFMARKIN_BASE){
-      newrule.nfmark_in = nfmark;
-      retnfmark = newrule.nfmark_out = nfmark - NFMARK_DELTA;
+  else { // ctmark > 0 => assign parent's ctmark
+    //either ctmark is for in or out traffic
+    if (ctmark >= CTMARKIN_BASE){
+      newrule.ctmark_in = ctmark;
+      retctmark = newrule.ctmark_out = ctmark - CTMARK_DELTA;
     }
     else {
-      retnfmark = newrule.nfmark_out = nfmark;
-      newrule.nfmark_in = nfmark + NFMARK_DELTA;
+      retctmark = newrule.ctmark_out = ctmark;
+      newrule.ctmark_in = ctmark + CTMARK_DELTA;
     }
   }
   newrule.first_instance = first_instance;
@@ -551,7 +551,7 @@ int ruleslist_add( const string path, const string pid, const string perms,
   if (perms == ALLOW_ALWAYS || perms == DENY_ALWAYS) {
     rules_write();
   }
-  return retnfmark;
+  return retctmark;
 }
 
 
@@ -563,8 +563,8 @@ void ruleslist_delete_all ( const string path) {
     if (rules[i].path != path) continue;
     if (rules[i].is_active) {
       _closedir (rules[i].dirstream);
-      nfmark_to_delete_in = rules[i].nfmark_in;
-      nfmark_to_delete_out = rules[i].nfmark_out;
+      ctmark_to_delete_in = rules[i].ctmark_in;
+      ctmark_to_delete_out = rules[i].ctmark_out;
     }
     bool was_active = rules[i].is_active;
     if (rules[i].perms == ALLOW_ALWAYS || rules[i].perms == DENY_ALWAYS){
@@ -597,8 +597,8 @@ void ruleslist_delete_one ( const string path, const string pid ) {
     if (rules[i].path != path || rules[i].pid != pid) continue;
     //else found
     _closedir (rules[i].dirstream);
-    nfmark_to_delete_in = rules[i].nfmark_in;
-    nfmark_to_delete_out = rules[i].nfmark_out;
+    ctmark_to_delete_in = rules[i].ctmark_in;
+    ctmark_to_delete_out = rules[i].ctmark_out;
     bool was_active = rules[i].is_active;
     rules.erase(rules.begin()+i);
     //remove tracking for this process's active connection only if this process was active
@@ -616,7 +616,7 @@ void ruleslist_delete_one ( const string path, const string pid ) {
 
 //Search cache which thread_build_pid_and_socket_cache built
 int search_pid_and_socket_cache(const long socket_in, string &path_out,
-                                    string &pid_out, int &nfmark_out){
+                                    string &pid_out, int &ctmark_out){
   _pthread_mutex_lock ( &rules_mutex );
   vector<rule> rulescopy = rules;
   _pthread_mutex_unlock ( &rules_mutex );
@@ -635,7 +635,7 @@ int search_pid_and_socket_cache(const long socket_in, string &path_out,
         return SOCKET_IN_CACHE_NOT_FOUND;}
       if (rulescopy[i].stime != stime) {
         return SPOOFED_PID;}
-      nfmark_out = rulescopy[i].nfmark_out;
+      ctmark_out = rulescopy[i].ctmark_out;
       return retval;
     }
   }
@@ -950,10 +950,10 @@ void* thread_refresh ( void* ptr ){
          //else this is the only *ALWAYS rule with such PATH
          rules[i].pid = "0";
          rules[i].is_active = false;
-         //nfmarks will be used by the next instance of app
-         vector<u_int32_t>nfmarks = get_nfmarks();
-         rules[i].nfmark_in = nfmarks[0];
-         rules[i].nfmark_out = nfmarks[1];
+         //conntrack marks will be used by the next instance of app
+         vector<u_int32_t>ctmarks = get_ctmarks();
+         rules[i].ctmark_in = ctmarks[0];
+         rules[i].ctmark_out = ctmarks[1];
          thisIterationHadAnUpdate = true;
          break; //out of rules iteration
        }
@@ -985,11 +985,11 @@ void rules_load(){
   bool is_full_path_found = false;
   bool is_permission_found = false;
   bool is_sha256_hexdigest_found = false;
-  bool is_netfilter_mark_found = false;
+  bool is_conntrack_mark_found = false;
   string full_path = "";
   string permission = "";
   string sha256_hexdigest = "";
-  int netfilter_mark = 0;
+  int conntrack_mark = 0;
 
   while (getline(inputFile, line))
   {
@@ -1005,22 +1005,22 @@ void rules_load(){
         newrule.is_active = false;
         newrule.stime = 0;
         newrule.first_instance = true;
-        newrule.nfmark_out = 0;
-        newrule.nfmark_in = 0;
-        if (is_netfilter_mark_found){
-          newrule.nfmark_out = netfilter_mark;
-          newrule.nfmark_in = netfilter_mark+NFMARK_DELTA;
-          newrule.is_fixed_nfmark = true;
+        newrule.ctmark_out = 0;
+        newrule.ctmark_in = 0;
+        if (is_conntrack_mark_found){
+          newrule.ctmark_out = conntrack_mark;
+          newrule.ctmark_in = conntrack_mark+CTMARK_DELTA;
+          newrule.is_fixed_ctmark = true;
         }
         rules.push_back(newrule);
         is_full_path_found = false;
         is_permission_found = false;
         is_sha256_hexdigest_found = false;
-        is_netfilter_mark_found = false;
+        is_conntrack_mark_found = false;
         full_path = "";
         permission = "";
         sha256_hexdigest = "";
-        netfilter_mark = 0;
+        conntrack_mark = 0;
       }
       continue;
     }
@@ -1053,13 +1053,13 @@ void rules_load(){
       is_sha256_hexdigest_found = true;
       continue;
     }
-    if (!is_netfilter_mark_found){
-      if (line.substr(0,16) != "netfilter_mark= ") return; //TODO should throw?
+    if (!is_conntrack_mark_found){
+      if (line.substr(0,16) != "conntrack_mark= ") return; //TODO should throw?
       //trim leading spaces
       line = line.substr(pos, string::npos);
       line = line.substr( line.find_first_not_of(" "), string::npos);
-      netfilter_mark = std::stoi(line);
-      is_netfilter_mark_found = true;
+      conntrack_mark = std::stoi(line);
+      is_conntrack_mark_found = true;
       continue;
     }
   }
@@ -1104,11 +1104,11 @@ void rules_write(bool mutex_being_held){
       "# permission= followed by either ALLOW_ALWAYS or DENY_ALWAYS\n"
       "# sha256_hexdigest= followed by sha256 UPPERCASE hexdigest with any leading zeroes\n"
       "# Optional parameters:\n"
-      "# netfilter_mark= followed by an integer\n"
-      "# (netfilter_mark can be manually assigned by the user in this file. This will enable the user\n"
+      "# conntrack_mark= followed by an integer\n"
+      "# (conntrack_mark can be manually assigned by the user in this file. This will enable the user\n"
       "# to create more complex netfilter rules for the application, e.g. rate-limiting, IP/port blocking etc\n"
-      "# netfilter_mark set here will be used for outgoing traffic\n"
-      "# for incoming traffic netfilter_mark+10000 will be used)\n"
+      "# conntrack_mark set here will be used for outgoing connections\n"
+      "# for incoming connections conntrack_mark+10000 will be used)\n"
       "\n"
       "# Make sure there is a blank line at the end of this file\n"
       "\n"
@@ -1116,7 +1116,7 @@ void rules_write(bool mutex_being_held){
       "# full_path=        /home/myusername/app1\n"
       "# permission=       ALLOW_ALWAYS\n"
       "# sha256_hexdigest= 3719407990275C319C882786125B1F148CC163FA3BF4C7712092034BBA06CE4D\n"
-      "# netfilter_mark=   11443\n"
+      "# conntrack_mark=   11443\n"
       "\n"
       "# full_path=        /home/myusername/app2\n"
       "# permission=       ALLOW_ALWAYS\n"
@@ -1127,8 +1127,8 @@ void rules_write(bool mutex_being_held){
     string_to_write += "full_path=        " + rulescopy[i].path + "\n";
     string_to_write += "permission=       " + rulescopy[i].perms + "\n";
     string_to_write += "sha256_hexdigest= " + rulescopy[i].sha + "\n";
-    if (rulescopy[i].is_fixed_nfmark){
-      string_to_write += "netfilter_mark=   " + to_string(rulescopy[i].nfmark_out) + "\n";
+    if (rulescopy[i].is_fixed_ctmark){
+      string_to_write += "conntrack_mark=   " + to_string(rulescopy[i].ctmark_out) + "\n";
     }
     string_to_write += "\n";
   }
@@ -1144,7 +1144,7 @@ void rules_write(bool mutex_being_held){
 ///proc/<PID>/fd socket entry wasn't yet created
 //3. (most usual case) A process associated with socket was found and now we need to check
 //if another rule with the same path is in rules. If so, we are either a fork()ed child or a new instance
-int path_find_in_rules ( int &nfmark_out, const string path_in,
+int path_find_in_rules ( int &ctmark_out, const string path_in,
                              const string pid_in, unsigned long long stime_in, bool going_out){
   _pthread_mutex_lock ( &rules_mutex );
   vector<rule> rulescopy = rules;
@@ -1180,13 +1180,13 @@ int path_find_in_rules ( int &nfmark_out, const string path_in,
       DIR *dirstream = opendir(rules[i].pidfdpath.c_str());
       //if the app immediately terminated we may get NULL
       if (dirstream != NULL) rules[i].dirstream = dirstream;
-      if (! rules[i].is_fixed_nfmark){
-        vector<u_int32_t>nfmarks = get_nfmarks();
-        rules[i].nfmark_in = nfmarks[0];
-        rules[i].nfmark_out = nfmarks[1];
+      if (! rules[i].is_fixed_ctmark){
+        vector<u_int32_t>ctmarks = get_ctmarks();
+        rules[i].ctmark_in = ctmarks[0];
+        rules[i].ctmark_out = ctmarks[1];
       }
-      if (going_out) nfmark_out = rules[i].nfmark_out;
-      else nfmark_out = rules[i].nfmark_in;
+      if (going_out) ctmark_out = rules[i].ctmark_out;
+      else ctmark_out = rules[i].ctmark_in;
       _pthread_mutex_unlock ( &rules_mutex );
       bRuleFound = true;
       break;
@@ -1239,7 +1239,7 @@ int path_find_in_rules ( int &nfmark_out, const string path_in,
       else if (parent_rule.perms == DENY_ALWAYS || parent_rule.perms == DENY_ONCE){
         retval = FORKED_CHILD_DENY;}
       unsigned long long stime = starttimeGet ( atoi ( pid_in.c_str() ) );
-      nfmark_out = ruleslist_add ( path_in, pid_in, parent_rule.perms, TRUE,
+      ctmark_out = ruleslist_add ( path_in, pid_in, parent_rule.perms, TRUE,
                                    parent_rule.sha, stime, 0, FALSE );
       if (bFrontendActive) {
         send_rules();
@@ -1258,7 +1258,7 @@ int path_find_in_rules ( int &nfmark_out, const string path_in,
       if (!(rulesWithTheSamePath[i].perms == ALLOW_ALWAYS ||
             rulesWithTheSamePath[i].perms == DENY_ALWAYS)) continue;
       //else
-      nfmark_out = ruleslist_add ( path_in, pid_in, rulesWithTheSamePath[i].perms,
+      ctmark_out = ruleslist_add ( path_in, pid_in, rulesWithTheSamePath[i].perms,
                                    TRUE, rulesWithTheSamePath[i].sha, stime_in, 0 ,FALSE);
       if (bFrontendActive) {
         send_rules();
@@ -1274,7 +1274,7 @@ int path_find_in_rules ( int &nfmark_out, const string path_in,
 //Try to find the socket among the active processes in lpfw rules
 //This is the 2nd searching place and not the 1st, because searching in cache is much cheaper
 int socket_active_processes_search ( const long mysocket_in, string &m_path_out,
-                                     string &m_pid_out, int  &nfmark_out){
+                                     string &m_pid_out, int  &ctmark_out){
   string path_dir;
   string path_file;
   DIR *m_dir;
@@ -1319,7 +1319,7 @@ int socket_active_processes_search ( const long mysocket_in, string &m_path_out,
         return SPOOFED_PID;
       }
       if (rulescopy[i].perms == ALLOW_ONCE  || rulescopy[i].perms == ALLOW_ALWAYS) {
-        nfmark_out = rulescopy[i].nfmark_out;
+        ctmark_out = rulescopy[i].ctmark_out;
         return SOCKET_FOUND_IN_DLIST_ALLOW;
       }
       if (rulescopy[i].perms == DENY_ONCE || rulescopy[i].perms == DENY_ALWAYS) {
@@ -1793,19 +1793,19 @@ endloop:
 
 
 //find process that owns the socket
-int socket_handle ( const long socket_in, int &nfmark_out, string &path_out,
+int socket_handle ( const long socket_in, int &ctmark_out, string &path_out,
                     string &pid_out, u_int64_t &stime_out, int srctcp){
 //the last arg srctcp is used for debug purposes only
   cout << "in socket handle \n";
   int retval;
-  retval = search_pid_and_socket_cache(socket_in, path_out, pid_out, nfmark_out);
+  retval = search_pid_and_socket_cache(socket_in, path_out, pid_out, ctmark_out);
   if (retval != SOCKET_IN_CACHE_NOT_FOUND){
     cout << "found in pid and socket cache \n";
     M_PRINTF (MLOG_DEBUG2, "(cache)");
     if (bTestingMode) assert (strstr(path_out.c_str(), "/tmp/lpfwtest/testprocess") != NULL);
     return retval;
   }
-  retval = socket_active_processes_search ( socket_in, path_out, pid_out, nfmark_out );
+  retval = socket_active_processes_search ( socket_in, path_out, pid_out, ctmark_out );
   if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND ){
     if (bTestingMode) assert (strstr(path_out.c_str(), "/tmp/lpfwtest/testprocess") != NULL);
     cout << "found among active processes \n";
@@ -1824,10 +1824,10 @@ int socket_handle ( const long socket_in, int &nfmark_out, string &path_out,
         die();
       }
     }
-    retval = path_find_in_rules ( nfmark_out, path_out, pid_out, stime_out, true);
+    retval = path_find_in_rules ( ctmark_out, path_out, pid_out, stime_out, true);
     if (retval == SEARCH_ACTIVE_PROCESSES_AGAIN){
       cout << "***************************SEARCHING AGAIN*****************\n";
-      retval = socket_active_processes_search ( socket_in, path_out, pid_out, nfmark_out );
+      retval = socket_active_processes_search ( socket_in, path_out, pid_out, ctmark_out );
     }
     return retval;
   }
@@ -1993,31 +1993,31 @@ void print_traffic_log(const int proto, const int direction, const string remote
 
 
 //NOT IN USE
-int socket_handle_icmp(int &nfmark_out, string &path_out,
+int socket_handle_icmp(int &ctmark_out, string &path_out,
                        string &pid_out, u_int64_t &stime_out)
 {
   int retval;
   long socket;
   retval = icmp_check_only_one_socket ( &socket );
   if (retval != ICMP_ONLY_ONE_ENTRY) {return retval;}
-  retval = socket_active_processes_search (socket, path_out, pid_out, nfmark_out );
+  retval = socket_active_processes_search (socket, path_out, pid_out, ctmark_out );
   if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND) {return retval;}
   retval = socket_procpidfd_search (socket, path_out, pid_out, stime_out);
   if (retval != SOCKET_FOUND_IN_PROCPIDFD) {return retval;}
-  retval = path_find_in_rules (nfmark_out, path_out, pid_out, stime_out, true);
+  retval = path_find_in_rules (ctmark_out, path_out, pid_out, stime_out, true);
   return retval;
 }
 
 
 //Not in use
-int inkernel_get_verdict(const char *ipaddr_in, int &nfmark_out) {
+int inkernel_get_verdict(const char *ipaddr_in, int &ctmark_out) {
   _pthread_mutex_lock ( &rules_mutex );
   for(int i = 0; i < rules.size(); i++){
     if (rules[i].path == KERNEL_PROCESS) continue;
     if (rules[i].pid != ipaddr_in) continue;
     if (rules[i].perms == ALLOW_ALWAYS || rules[i].perms == ALLOW_ONCE) {
       rules[i].is_active = true;
-      nfmark_out = rules[i].nfmark_out;
+      ctmark_out = rules[i].ctmark_out;
       _pthread_mutex_unlock(&rules_mutex);
       return INKERNEL_RULE_ALLOW;
     }
@@ -2053,7 +2053,7 @@ int send_rules() {
     string b64path = base64_encode(
           reinterpret_cast<const unsigned char*>(rules[k].path.c_str()), rules[k].path.length());
     message += b64path + " " + rules[k].pid + " " + rules[k].perms + " "
-        + is_active + " " + to_string(rules[k].nfmark_out) + " CRLF ";
+        + is_active + " " + to_string(rules[k].ctmark_out) + " CRLF ";
   }
   message += " EOL ";
   rulesListQueue.push(message);
@@ -2109,7 +2109,7 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   string proto_str = "";
   string proto6_str = "";
   u_int64_t starttime;
-  int nfmark;
+  int ctmark;
 
   cout << "nfq_handle - raddr: " << raddr << " laddr:" << laddr << "\n";
 
@@ -2183,13 +2183,13 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 //  if (socket_found == 0){
 //    verdict = inkernel_check(lport_hostbo, proto);
 //    if (verdict == INKERNEL_SOCKET_FOUND) {
-//      verdict = inkernel_get_verdict(raddr, nfmark);
+//      verdict = inkernel_get_verdict(raddr, ctmark);
 //    }
 //    else { goto execute_verdict; }
 //  }
 
   fe_was_busy = awaiting_reply_from_fe;
-  verdict = socket_handle (socket_found, nfmark, path, pid, starttime, lport_hostbo );
+  verdict = socket_handle (socket_found, ctmark, path, pid, starttime, lport_hostbo );
   if (verdict == PATH_IN_RULES_NOT_FOUND || verdict == PATH_IN_RULES_FOUND_BUT_PERMS_ARE_ONCE){
     if (! bFrontendActive) { verdict = FRONTEND_NOT_LAUNCHED; }
     else if (fe_was_busy) { verdict = FRONTEND_BUSY; }
@@ -2199,7 +2199,7 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
       //There was a small window when we were inside socket_handle_out
       //for the frontend to respond. So, we double-check that the path
       //we are about to query was not added to the rules during that small window
-      verdict = path_find_in_rules (nfmark, path, pid, starttime, true);
+      verdict = path_find_in_rules (ctmark, path, pid, starttime, true);
       if (verdict == PATH_IN_RULES_NOT_FOUND || verdict == PATH_IN_RULES_FOUND_BUT_PERMS_ARE_ONCE) {
         verdict = send_request(path, pid, to_string(starttime), string(raddr),
                              to_string(lport_hostbo), to_string(rport_hostbo), direction);
@@ -2214,9 +2214,9 @@ execute_verdict:
                     path, pid, verdict);
 
   if (direction == DIRECTION_OUT){
-    nfmark_to_set = nfmark;}
+    ctmark_to_set = ctmark;}
   else if (direction == DIRECTION_IN){
-    nfmark_to_set = nfmark + NFMARK_DELTA;}
+    ctmark_to_set = ctmark + CTMARK_DELTA;}
 
   if (verdict < ALLOW_VERDICT_MAX) {
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
@@ -2248,7 +2248,7 @@ execute_verdict:
     nfct_destroy(nf_ct);
   } //if (verdict < ALLOW_VERDICT_MAX)
   else if (verdict < DENY_VERDICT_MAX) {
-    denied_traffic_add (direction, nfmark_to_set, ip->tot_len );
+    denied_traffic_add (direction, ctmark_to_set, ip->tot_len );
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
   }
   else{
@@ -2388,9 +2388,6 @@ int parse_command_line(int argc, char* argv[])
   lpfw_logfile_pointer = (char*)_malloc(strlen(LPFW_LOGFILE)+1);
   strcpy (lpfw_logfile_pointer, LPFW_LOGFILE);
   log_file->filename[0] = lpfw_logfile_pointer;
-
-  cli_path->filename[0] = CLI_FILE;
-  pygui_path->filename[0] = GUI_FILE;
 
   * ( log_info->ival ) = 1;
   * ( log_traffic->ival ) = 1;

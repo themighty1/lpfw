@@ -8,10 +8,10 @@
 extern pthread_cond_t condvar;
 extern pthread_mutex_t condvar_mutex;
 extern char predicate;
-extern int nfmark_to_delete_in, nfmark_to_delete_out;
-extern int nfmark_to_set;
+extern int ctmark_to_delete_in, ctmark_to_delete_out;
+extern int ctmark_to_set;
 
-//Register a callback to delete nfmark and wait on condition to be triggered.
+//Register a callback to delete ctmark and wait on condition to be triggered.
 void* thread_ct_delete_mark ( void* ptr );
 //delete ct entry according to mark (e.g. when process exits and we don't want any of its established
 //connections to linger in ct

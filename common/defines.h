@@ -17,10 +17,10 @@
 #define DIGEST_SIZE 32
 #define TTYNAME 16
 #define DISPLAYNAME 32
-#define NFMARKOUT_BASE 11331 //netfilter marks to be put on packets start with this base number (to avoid possible collision with other programs that use netfilter's marks
-#define NFMARKIN_BASE  21331
-#define NFMARK_DELTA 10000 //fixed number NFMARKIN_BASE - NFMARKOUT_BASE. N.B. use a number here, see below
-//#define NFMARK_DELTA NFMARKIN_BASE-NFMARKOUT_BASE //This doesn't work
+#define CTMARKOUT_BASE 11331 //conntrack marks start with this base number
+//(to avoid possible collision with other programs that use conntrack marks
+#define CTMARKIN_BASE  21331
+#define CTMARK_DELTA 10000 //fixed number CTMARKIN_BASE - CTMARKOUT_BASE. N.B. use a number here, see below
 #define MEMBUF_SIZE 65536 //buffer size to fread() /proc/net/tcp*,udp*
 #define MAX_CACHE 1024 ///proc/pid/FD sockets of one process
 

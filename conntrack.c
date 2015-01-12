@@ -36,9 +36,9 @@ char predicate = FALSE;
 //two NFCT_Q_DUMP simultaneous operations can produce an error
 pthread_mutex_t ct_dump_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ct_entries_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_t ct_dump_thr, ct_destroy_hook_thr, ct_delete_nfmark_thr;
+pthread_t ct_dump_thr, ct_destroy_hook_thr, ct_delete_ctmark_thr;
 
-int nfmark_to_delete_in, nfmark_to_delete_out;
+int ctmark_to_delete_in, ctmark_to_delete_out;
 struct nfct_handle *setmark_handle;
 extern bool conntrack_send_anyway;
 
@@ -47,11 +47,11 @@ ulong ct_array[CT_ENTRIES_EXPORT_MAX][9] = {};
 //this array is built for export to frontend based on ct_array
 ulong ct_array_export[CT_ENTRIES_EXPORT_MAX][5] = {};
 /*
-  [0] nfmark (export[0])
+  [0] ctmark (export[0])
   [1] bytes in allowed
   [2] bytes out allowed
-  [3] bytes in from all previously destroyed conntracks which had this nfmark
-  [4] bytes out from all previously destroyed conntracks which had this nfmark
+  [3] bytes in from all previously destroyed conntracks which had this ctmark
+  [4] bytes out from all previously destroyed conntracks which had this ctmark
   [5] [1] + [3] (export[1])
   [6] [2] + [4] (export[2])
   [7] total bytes in denied so far  (export[3])
@@ -95,7 +95,7 @@ void* thread_ct_delete_mark ( void* ptr )
 int setmark (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
   static nfct_handle *handle = _nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
-  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set);
+  nfct_set_attr_u32(mct, ATTR_MARK, ctmark_to_set);
   nfct_query(handle, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
@@ -117,7 +117,7 @@ void init_conntrack(){
   _pthread_create ( &tcp_export_thr, (pthread_attr_t *)NULL, tcp_export_thread, (void *)NULL);
   _pthread_create ( &ct_dump_thr, (pthread_attr_t *)NULL, thread_ct_dump, (void *)NULL );
   _pthread_create ( &ct_destroy_hook_thr, (pthread_attr_t *)NULL, thread_ct_destroy, (void *)NULL);
-  _pthread_create ( &ct_delete_nfmark_thr, (pthread_attr_t *)NULL, thread_ct_delete_mark, (void *)NULL);
+  _pthread_create ( &ct_delete_ctmark_thr, (pthread_attr_t *)NULL, thread_ct_delete_mark, (void *)NULL);
 }
 
 
@@ -179,7 +179,7 @@ int ct_delete_mark_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,
 {
   static nfct_handle *handle_delete = _nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
   int mark = nfct_get_attr_u32(mct, ATTR_MARK);
-  if ( mark == nfmark_to_delete_in || mark == nfmark_to_delete_out){
+  if ( mark == ctmark_to_delete_in || mark == ctmark_to_delete_out){
     if (nfct_query(handle_delete, NFCT_Q_DESTROY, mct) == -1){
       printf("Error: nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return NFCT_CB_CONTINUE;
@@ -242,7 +242,7 @@ int ct_destroy_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void
     out_bytes = nfct_get_attr_u64(mct, ATTR_ORIG_COUNTER_BYTES);
     in_bytes = nfct_get_attr_u64(mct, ATTR_REPL_COUNTER_BYTES);
     if (in_bytes != 0 && out_bytes != 0){
-      printf ("Error: conntrack with nfmark 0 detected with leaked bytes \n");
+      printf ("Error: conntrack with mark 0 detected with leaked bytes \n");
       cout << "src_addr: " << src_addr << "\n";
       cout << "dst_addr: " << dst_addr << "\n";
       //TODO figure out a long-term solution for this rare problem
@@ -273,7 +273,7 @@ scan_again:
     cout << "************Scanning again in ct_destroy_cb \n";
     goto scan_again;
   }
-  cout << "Error: unknown nfmark in ct_destroy_cb even after scanning again: " << mark << "\n";
+  cout << "Error: unknown conntrack mark in ct_destroy_cb even after scanning again: " << mark << "\n";
   return NFCT_CB_CONTINUE;
   //TODO this error should be logged with a dump and analyzed
 }
@@ -308,12 +308,12 @@ void * thread_ct_dump( void *ptr)
     //rearrange array for export
     for (i=0; ct_array[i][0] != 0; ++i){
       for (j=0; ct_array_export[j][0] !=0; ++j) {
-        //if this is an IN nfmark
-        if (ct_array[i][0] >= NFMARKIN_BASE) {
-          //find its OUT nfmark
-          int delta = ct_array[i][0] - NFMARK_DELTA;
+        //if this is an IN ctmark
+        if (ct_array[i][0] >= CTMARKIN_BASE) {
+          //find its OUT ctmark
+          int delta = ct_array[i][0] - CTMARK_DELTA;
           if (delta == ct_array_export[j][0]){
-            //bytes in for IN nfmark are bytes out for OUT nfmark
+            //bytes in for IN ctmark are bytes out for OUT ctmark
             ct_array_export[j][1] += ct_array[i][6];
             ct_array_export[j][2] += ct_array[i][5];
             ct_array_export[j][3] += ct_array[i][8];
@@ -321,7 +321,7 @@ void * thread_ct_dump( void *ptr)
             goto next;
           }
         }
-        //else if this is a OUT nfmark
+        //else if this is a OUT ctmark
         if (ct_array[i][0] == ct_array_export[j][0]){
           ct_array_export[j][1] += ct_array[i][5];
           ct_array_export[j][2] += ct_array[i][6];
@@ -331,8 +331,8 @@ void * thread_ct_dump( void *ptr)
         }
       }
       //Doesn't exist in export list, create an entry
-      if (ct_array[i][0] >= NFMARKIN_BASE){
-        ct_array_export[j][0] = ct_array[i][0] - NFMARK_DELTA;
+      if (ct_array[i][0] >= CTMARKIN_BASE){
+        ct_array_export[j][0] = ct_array[i][0] - CTMARK_DELTA;
         ct_array_export[j][1] = ct_array[i][6];
         ct_array_export[j][2] = ct_array[i][5];
         ct_array_export[j][3] = ct_array[i][8];

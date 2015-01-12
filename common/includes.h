@@ -46,11 +46,13 @@ struct rule{
   string pid; //its pid (or IP address for kernel processes)
   string perms; // permission in the form "ALLOW ALWAYS"
   string sha; //sha256 hexdigest
-  u_int32_t nfmark_out;
-  u_int32_t nfmark_in; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
+  u_int32_t ctmark_out;
+  u_int32_t ctmark_in; //conntrack mark assigned to each new connection
+  //and used when a user deletes a rule to tell conntrack to immediately
+  //drop any existing connections associated with the mark
   bool is_active; //Has process already been seen sending/receiving packets?
   bool first_instance; //TRUE for a first instance of an app or a parent process
-  bool is_fixed_nfmark = false; //the user may assign a fixed netfilter mark for conntrack purposes
+  bool is_fixed_ctmark = false; //the user may assign a fixed netfilter mark for conntrack purposes
   //first_instance doesnt seem to be in use, i couldnt understand what it does
   unsigned long long stime; // start time of the process
   vector<long> sockets;//sockets owned by the processes
