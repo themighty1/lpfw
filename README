@@ -19,12 +19,6 @@ Run lpfw as root. Run python gui/gui.py as regular user.
 
 
 
-ADVANCED CONFIGURATION:
-
-	lpfw can be run as user with the following capabilities:
-CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID
-
-
 COMMANDLINE ARGUMENTS:
   These can be also seen with "lpfw --help".
 
@@ -77,9 +71,6 @@ An example of traffic log's line:
 10. Action taken by LPFW with regard to this packet
 
 
-
-
-
 ARCHITECTURE
 
 LeopardFlower (LPFW) utilizes a facility provided by netfilter whereby all outgoing and incoming packets which initiate a new connection are delivered to LPFW for decision on whether to drop them or accept them. LPFW sets up a rule with iptables similar to
@@ -95,12 +86,10 @@ In order to establish a correlation between a packet which hit nfq and the appli
 
 LPFW sets a unique netfilter mark on all connections of a specific app. This enables LPFW to instantly halt all app's internet activity if user chooses so. In order to set such a netfilter mark, LPFW uses libnetfilter_conntrack library.
 
-SECURITY
 
-Only frontend with GID "lpfwuser" can communicate with LPFW. To that end LPFW enable setgid bit on lpfwcli and lpfwpygui.
-LPFW needs to start with the following capabilities:
+SECURITY
+lpfw strips itself of all capabilities except the following:
+
 CAP_SYS_PTRACE (to readlink() root's links in /proc)
 CAP_NET_ADMIN (to use netfilter_queue and netfilter_conntrack)
 CAP_DAC_READ_SEARCH (to scan all users' /proc/ entries)
-CAP_SETUID (to setuid(0) on itself)
-CAP_SETGID (to setgid("lpfwuser") on itself)

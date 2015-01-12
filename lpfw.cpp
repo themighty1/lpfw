@@ -2497,23 +2497,10 @@ void capabilities_setup()
       printf ("CAP_DAC_READ_SEARCH is not permitted \n");
       exit(0);
     }
-  cap_get_flag(cap_current, CAP_SETUID, CAP_PERMITTED, &value);
-  if (value == CAP_CLEAR)
-    {
-      printf ("CAP_SETUID is not permitted \n");
-      exit(0);
-    }
-  cap_get_flag(cap_current, CAP_SETGID, CAP_PERMITTED, &value);
-  if (value == CAP_CLEAR)
-    {
-      printf ("CAP_SETGID is not permitted \n");
-      exit(0);
-    }
 
   _cap_clear(cap_current);
-  const cap_value_t caps_list[] = {CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH,
-                                   CAP_SETUID, CAP_SETGID};
-  _cap_set_flag(cap_current, (cap_flag_t)CAP_PERMITTED, 5, caps_list, (cap_flag_value_t)CAP_SET);
+  const cap_value_t caps_list[] = {CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH};
+  _cap_set_flag(cap_current, (cap_flag_t)CAP_PERMITTED, 3, caps_list, (cap_flag_value_t)CAP_SET);
   _cap_set_proc(cap_current);
 
 #ifdef DEBUG
@@ -2811,8 +2798,8 @@ int main ( int argc, char *argv[] )
   }
 
   capabilities_setup();
-  setuid_root();
-  setgid_lpfwuser();
+  //setuid_root();
+  //setgid_lpfwuser();
   if (prctl(PR_SET_DUMPABLE, 1) == -1){ perror("prctl SET_DUMPABLE"); }
   setup_signal_handlers();
 
