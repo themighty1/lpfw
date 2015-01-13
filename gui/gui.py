@@ -122,7 +122,7 @@ class myDialogIn(queryDialog, Ui_Dialog):
 
 
 class myMainWindow(QMainWindow, Ui_MainWindow):
-    askusersig = pyqtSignal(str, unicode, str, str, str, str) #connected to askUserOUT
+    askusersig = pyqtSignal(str, str, str, str, str, str) #connected to askUserOUT
     refreshmodelsig = pyqtSignal(str)
     update_bytestatssig = pyqtSignal(str)
     prevstats = ''
@@ -494,7 +494,7 @@ if __name__ == "__main__":
         import wingdbstub
 
     app=QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(True)
+    app.setQuitOnLastWindowClosed(False)
     window = myMainWindow()
 
     tray = QSystemTrayIcon(QIcon(":/pics/pic24.png"))
