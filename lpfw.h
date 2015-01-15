@@ -8,10 +8,6 @@
 #include <stdio.h> // for FILE*
 using namespace std;
 
-//PID of currently active frontend
-extern pid_t fe_pid;
-//Pointer to function which does the logging
-extern int (*m_printf)(const int loglevel, const char *logstring);
 //enables other files to use the logging facility
 extern pthread_mutex_t logstring_mutex;
 extern char logstring[PATHSIZE];
@@ -33,12 +29,6 @@ int build_udp6_port_and_socket_cache(long &socket_out, const int port_in);
 //returns socket corresponding to port or -1 if not found
 unsigned long is_port_in_cache(const int port, const int proto);
 unsigned long is_udp_port_in_cache(const int port);
-
-//print logstring to the preffered logging facility. A pointer to one of these functions is assigned
-//to m_printf
-int m_printf_stdout ( const int loglevel, const char * logstring );
-int m_printf_file ( const int loglevel, const char * logstring );
-int m_printf_syslog (const int loglevel, const char * logstring);
 
 //find socket in pid_and_socket cache of active rules only and return path,pid,ctmark if found
 int search_pid_and_socket_cache(const long socket_in, string &path_out,

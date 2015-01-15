@@ -69,12 +69,9 @@ bool log_traffic = true;
 bool log_debug = false;
 bool test = false;
 
-FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
+ofstream log_to_file_stream;
 
 vector<rule> rules; //each rule contains path,permission,hash
-
-//pointer to the actual logging function
-int ( *m_printf ) ( const int loglevel, const char *logstring );
 
 //mutex to protect ruleslist
 pthread_mutex_t rules_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -112,6 +109,7 @@ bool conntrack_send_anyway = false; //used to tell ct thread to send stats even 
 
 //fwd delarations
 int send_rules();
+void log(string);
 
 
 void set_awaiting_reply_from_fe(bool toggle){
@@ -143,28 +141,10 @@ vector<string> split_string(string input, string delimiter=" "){
 }
 
 
-void print_trace() {
-    char pid_buf[30];
-    sprintf(pid_buf, "%d", getpid());
-    char name_buf[512];
-    name_buf[readlink("/proc/self/exe", name_buf, 511)]=0;
-    int child_pid = fork();
-    if (!child_pid) {
-        dup2(2,1); // redirect output to stderr
-        fprintf(stdout,"stack trace for %s pid=%s\n",name_buf,pid_buf);
-        execlp("gdb", "gdb", "--batch", "-n", "-ex", "thread", "-ex", "bt", name_buf, pid_buf, NULL);
-        abort(); /* If gdb failed to start */
-    } else {
-        waitpid(child_pid,NULL,0);
-    }
-}
-
-
 void die(string message = ""){
-  if (message != "") cout << message << "\n";
-  cout << "dumping core \n";
+  if (message != "") log(message);
+  log("dumping core \n");
   abort();
-  //print_trace();
 }
 
 //return 2 conntrack marks: input and output
@@ -313,7 +293,7 @@ int build_port_and_socket_cache(unsigned long &socket_out, const string localadd
         }
 
         if (socket == 0){
-          cout << "socket == 0 \n";
+          log("socket == 0");
           goto dump_debug;}
 
         if(  ((proto == "TCP" || proto == "UDP") && (raddr[6] == '7' && raddr[7] == 'F')) ||
@@ -334,11 +314,11 @@ int build_port_and_socket_cache(unsigned long &socket_out, const string localadd
           //TODO: assert here that raddr:rport = 0 because this is a listening socket
           //it must not know it's peer at this point
           if (bSocketFound){
-            cout << "Duplicate connection detected \n";
+            log("Duplicate connection detected");
             //goto dump_debug;
           }
           socket_out = socket;
-          cout << "socket found with state:" << string(state) << "\n";
+          log("socket found with state:" + string(state));
           bSocketFound = true;
         }
       }
@@ -378,96 +358,13 @@ int fe_active_flag_get()
 }
 
 
-int m_printf_stdout ( const int loglevel, const char * logstring ){
-  switch ( loglevel ){
-    case MLOG_INFO:
-      // check if INFO logging enabled
-      if (! log_info) return 0;
-      printf ( "%s", logstring );
-      return 0;
-    case MLOG_TRAFFIC:
-      if (! log_traffic) return 0;
-      printf ( "%s", logstring );
-      return 0;
-    case MLOG_DEBUG:
-      if (! log_debug) return 0;
-      printf ( "%s", logstring );
-      return 0;
-    case MLOG_DEBUG2:
-#ifdef DEBUG2
-      if (! log_debug) return 0;
-      printf ( "%s", logstring );
-#endif
-      return 0;
-    case MLOG_DEBUG3:
-#ifdef DEBUG3
-      if (! log_debug) return 0;
-      printf ( "%s", logstring );
-#endif
-      return 0;
-    case MLOG_ALERT: //Alerts get logged unconditionally to all log channels
-      printf ( "ALERT: " );
-      printf ( "%s", logstring );
-      return 0;
-    }
-}
-
-
-//technically vfprintf followed by fsync should be enough, but for some reason on my system it can take more than 1 minute before data gets actually written to disk. So until the mystery of such a huge delay is solved, we use write() so data gets written to dist immediately
-int m_printf_file ( const int loglevel, const char * logstring ){
-  switch ( loglevel ){
-    case MLOG_INFO:
-      // check if INFO logging enabled
-      if (! log_info) return 0;
-      write ( fileno ( fileloginfo_stream ), logstring, strlen ( logstring ) );
-      return 0;
-    case MLOG_TRAFFIC:
-      if (! log_traffic) return 0;
-      write ( fileno ( filelogtraffic_stream ), logstring, strlen ( logstring ) );
-      return 0;
-    case MLOG_DEBUG:
-      if (! log_debug) return 0;
-      write ( fileno ( filelogdebug_stream ), logstring, strlen ( logstring ) );
-      return 0;
-    case MLOG_ALERT: //Alerts get logged unconditionally to all log channels
-      write ( fileno ( filelogdebug_stream ), "ALERT: ", strlen ( logstring ) );
-      return 0;
-    }
-}
-
-
-#ifndef WITHOUT_SYSLOG
-int m_printf_syslog (const int loglevel, const char * logstring){
-  switch ( loglevel ){
-    case MLOG_INFO:
-      // check if INFO logging enabled
-      if (! log_info) return 0;
-      syslog ( LOG_INFO, "%s", logstring );
-      return 0;
-    case MLOG_TRAFFIC:
-      if (! log_traffic) return 0;
-      syslog ( LOG_INFO, "%s", logstring );
-      return 0;
-    case MLOG_DEBUG:
-      if (! log_debug) return 0;
-      syslog ( LOG_INFO, "%s", logstring );
-      return 0;
-    case MLOG_ALERT: //Alerts get logget unconditionally to all log channels
-      syslog ( LOG_INFO, "ALERT: " );
-      syslog ( LOG_INFO, "%s", logstring );
-      return 0;
-    }
-}
-#endif
-
-
 unsigned long long starttimeGet ( const int mypid ) {
   unsigned long long starttime;
   FILE *stream;
   string path = "/proc/" + to_string(mypid) + "/stat";
   stream = fopen (path.c_str(), "r" );
   if (stream == NULL) {
-    cout << "***********************************PROCPIDSTAT no found for " << mypid << "\n";
+    log("***********************************PROCPIDSTAT no found for " + to_string(mypid));
     return -1; }
   fscanf ( stream, "%*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s"
            "%*s %*s %*s %*s %*s %*s %*s %llu", &starttime );
@@ -497,7 +394,7 @@ int ruleslist_add( const string path, const string pid, const string perms,
     //make sure it's not a duplicate of a regular (i.e. non-kernel) rule
     for(i=0; i < rules.size(); i++){
       if (rules[i].path == path && rules[i].pid == pid){
-        cout << "path " << path << " pid " << pid << "\n";
+        log("path "+path+" pid "+pid);
         die("duplicate rule");
         //_pthread_mutex_unlock ( &rules_mutex );
         //return 0;
@@ -768,7 +665,7 @@ void tcp_server_process_messages(int newsockfd) {
     }
     if (bDataAvailable){
       if (send(newsockfd, send_msg.c_str(), send_msg.length(), MSG_NOSIGNAL) < 0) {
-        cout << "ERROR writing to socket. UNREGISTERing \n";
+        log("ERROR writing to socket. UNREGISTERing");
         set_awaiting_reply_from_fe(false);
         _close(newsockfd);
         return;
@@ -787,7 +684,7 @@ void tcp_server_process_messages(int newsockfd) {
     vector<string> string_parts = split_string(string(buffer));
     string comm = string_parts[0];
     if (comm == "LIST"){
-      cout << "in LIST \n";
+      log("in LIST ");
       //We could send right from here, however calling a special function is cleaner
       send_rules();
       //Tell conntrack to send stats even if there was no recent update
@@ -796,14 +693,14 @@ void tcp_server_process_messages(int newsockfd) {
     }
     else if (comm == "DELETE"){ // comm path
       string path = base64_decode(string_parts[1]);
-      cout << "backend deleting " << path << "\n";
+      log("backend deleting " + path);
       ruleslist_delete_all(path);
     }
     else if (comm == "WRITE"){ //Not in use
       rules_write();
     }
     else if (comm == "ADD"){ //ADD path pid perms
-      cout << "ADDing a rule \n";
+      log("ADDing a rule ");
       if (!awaiting_reply_from_fe) die();
       string path = base64_decode(string_parts[1]);
       string pid = string_parts[2];
@@ -821,7 +718,7 @@ void tcp_server_process_messages(int newsockfd) {
         memset ( exepathbuf, 0, PATHSIZE );
         readlink (procpath.c_str(), exepathbuf, PATHSIZE-1 );
         if (exepathbuf != path){
-          cout << "Frontend asked to add a process that is no longer running \n";
+          log("Frontend asked to add a process that is no longer running");
           set_awaiting_reply_from_fe(false);
           continue;
         }
@@ -829,7 +726,7 @@ void tcp_server_process_messages(int newsockfd) {
 //         unsigned long long stime;
 //         stime = starttimeGet(atoi(pid));
 //         if ( sent_to_fe_struct.stime != stime ){
-//           cout << "Red alert!!!Start times don't match";
+//           log("Red alert!!!Start times don't match");
 //            throw "Red alert!!!Start times don't match";
 //           awaiting_reply_from_fe = FALSE;
 //         }
@@ -845,7 +742,7 @@ void tcp_server_process_messages(int newsockfd) {
       set_awaiting_reply_from_fe(false);
       return;
     }
-    else {cout << "unknown command: " << comm << "size:" << n << "\n";}
+    else {log("unknown command:"+comm+" size:"+to_string(n));}
   } //while (true)
 }
 
@@ -875,7 +772,7 @@ void* thread_tcp_server ( void *data ) {
      local_port = ntohs(sin.sin_port);
    }
 
-   cout << "Daemon tcp port:" << local_port << "\n";
+   log("Daemon tcp port:"+to_string(local_port));
    ofstream myfile("/tmp/lpfwcommport");
    myfile << to_string(local_port);
    myfile.close();
@@ -1229,7 +1126,7 @@ int path_find_in_rules ( int &ctmark_out, const string path_in,
     for(i = 0; i < rulesWithTheSamePath.size(); i++) {
       if (rulesWithTheSamePath[i].pid != ppid) continue;
       //we get here if we have a fork()ed child
-      cout << "***********FOUND A FORKED CHILD \n";
+      log("***********FOUND A FORKED CHILD");
       rule parent_rule = rulesWithTheSamePath[i];
       if (parent_rule.perms == ALLOW_ALWAYS || parent_rule.perms == ALLOW_ONCE){
         retval = FORKED_CHILD_ALLOW;}
@@ -1302,7 +1199,7 @@ int socket_active_processes_search ( const long mysocket_in, string &m_path_out,
       char exepathbuf[PATHSIZE];
       size = readlink (procexepath.c_str(), exepathbuf, PATHSIZE ); //no trailing 0
       if (size == -1){
-        fprintf(stderr, "Error in readlink %d - %s\n", errno, strerror(errno));
+        printf("Error in readlink %d - %s\n", errno, strerror(errno));
         _closedir ( m_dir );
         return SOCKET_ACTIVE_PROCESSES_NOT_FOUND;
       }
@@ -1312,7 +1209,7 @@ int socket_active_processes_search ( const long mysocket_in, string &m_path_out,
       _closedir ( m_dir );
       unsigned long long stime = starttimeGet ( atoi ( rulescopy[i].pid.c_str() ) );
       if ( rulescopy[i].stime != stime ) {
-        printf ("SPOOFED_PID in %s %s %d", rulescopy[i].path.c_str(),  __FILE__, __LINE__ );
+        printf ("SPOOFED_PID in %s", rulescopy[i].path.c_str() );
         return SPOOFED_PID;
       }
       if (rulescopy[i].perms == ALLOW_ONCE  || rulescopy[i].perms == ALLOW_ALWAYS) {
@@ -1793,25 +1690,23 @@ endloop:
 int socket_handle ( const long socket_in, int &ctmark_out, string &path_out,
                     string &pid_out, u_int64_t &stime_out, int srctcp){
 //the last arg srctcp is used for debug purposes only
-  cout << "in socket handle \n";
   int retval;
   retval = search_pid_and_socket_cache(socket_in, path_out, pid_out, ctmark_out);
   if (retval != SOCKET_IN_CACHE_NOT_FOUND){
-    cout << "found in pid and socket cache \n";
-    M_PRINTF (MLOG_DEBUG2, "(cache)");
+    log("found in pid and socket cache");
     if (bTestingMode) assert (strstr(path_out.c_str(), "/tmp/lpfwtest/testprocess") != NULL);
     return retval;
   }
   retval = socket_active_processes_search ( socket_in, path_out, pid_out, ctmark_out );
   if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND ){
     if (bTestingMode) assert (strstr(path_out.c_str(), "/tmp/lpfwtest/testprocess") != NULL);
-    cout << "found among active processes \n";
+    log("found among active processes");
     return retval;
   }
   retval = socket_procpidfd_search ( socket_in, path_out, pid_out, stime_out );
   if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD){ return retval; }
   else if (retval == SOCKET_FOUND_IN_PROCPIDFD){
-    cout << "found after searching procfd \n";
+    log("found after searching procfd");
     if (bTestingMode){
       if (strstr(path_out.c_str(), "/tmp/lpfwtest/testprocess") == NULL) {
         cout << "wrong path " << path_out << "\n";
@@ -1823,7 +1718,7 @@ int socket_handle ( const long socket_in, int &ctmark_out, string &path_out,
     }
     retval = path_find_in_rules ( ctmark_out, path_out, pid_out, stime_out, true);
     if (retval == SEARCH_ACTIVE_PROCESSES_AGAIN){
-      cout << "***************************SEARCHING AGAIN*****************\n";
+      log("***************************SEARCHING AGAIN*****************");
       retval = socket_active_processes_search ( socket_in, path_out, pid_out, ctmark_out );
     }
     return retval;
@@ -1901,16 +1796,16 @@ void print_traffic_log(const int proto, const int direction, const string remote
     case FORKED_CHILD_ALLOW:
     case CACHE_TRIGGERED_ALLOW:
     case INKERNEL_RULE_ALLOW:
-      m_logstring += "allow\n";
+      m_logstring += "allow";
       break;
     case GLOBAL_RULE_ALLOW:
-      m_logstring += "(global rule) allow\n";
+      m_logstring += "(global rule) allow";
       break;
     case CANT_READ_EXE:
-      m_logstring += "(can't read executable file) drop\n";
+      m_logstring += "(can't read executable file) drop";
       break;
     case SENT_TO_FRONTEND:
-      m_logstring +=  "(asking frontend) drop\n";
+      m_logstring +=  "(asking frontend) drop";
       break;
     case SOCKET_FOUND_IN_DLIST_DENY:
     case PATH_FOUND_IN_DLIST_DENY:
@@ -1918,74 +1813,73 @@ void print_traffic_log(const int proto, const int direction, const string remote
     case FORKED_CHILD_DENY:
     case CACHE_TRIGGERED_DENY:
     case INKERNEL_RULE_DENY:
-      m_logstring += "deny\n";
+      m_logstring += "deny";
       break;
     case GLOBAL_RULE_DENY:
-      m_logstring += "(global rule) deny \n";
+      m_logstring += "(global rule) deny";
       break;
     case SOCKET_NOT_FOUND_IN_PROCPIDFD:
-      m_logstring +=  "(no process associated with socket) drop\n";
+      m_logstring +=  "(no process associated with socket) drop";
       break;
     case LOCALPORT_NOT_FOUND_IN_PROCNET:
-      m_logstring +=  "(no socket associated with port) drop\n";
+      m_logstring +=  "(no socket associated with port) drop";
       break;
     case SOCKET_ACTIVE_PROCESSES_NOT_FOUND:
     //this verdict is triggered when on the first iteration of socket_active_processes_search()
     //socket was not found. Then it was found in socket_procpidfd_search()
     //and then on the second iteration of socket_active_processes_search(), it was not found again
-      m_logstring +=  "(process exited while searching for socket) drop\n";
+      m_logstring +=  "(process exited while searching for socket) drop";
       break;
     case FRONTEND_NOT_LAUNCHED:
-      m_logstring += "(frontend not active) drop\n";
+      m_logstring += "(frontend not active) drop";
       break;
     case FRONTEND_BUSY:
-      m_logstring += "(frontend busy) drop\n";
+      m_logstring += "(frontend busy) drop";
       break;
     case UNSUPPORTED_PROTOCOL:
-      m_logstring += "(unsupported protocol) drop\n";
+      m_logstring += "(unsupported protocol) drop";
       break;
     case ICMP_MORE_THAN_ONE_ENTRY:
-      m_logstring += "More than one program is using icmp, dropping\n";
+      m_logstring += "More than one program is using icmp, dropping";
       break;
     case ICMP_NO_ENTRY:
-      m_logstring += "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n";
+      m_logstring += "icmp packet received by there is no icmp entry in /proc. Please report";
       break;
     case SHA_DONT_MATCH:
-      m_logstring += "Red alert. Some app is trying to impersonate another\n";
+      m_logstring += "Red alert. Some app is trying to impersonate another";
       break;
     case SPOOFED_PID:
-      m_logstring += "Attempt to spoof PID detected\n";
+      m_logstring += "Attempt to spoof PID detected";
       break;
     case EXESIZE_DONT_MATCH:
-      m_logstring += "Red alert. Executable's size don't match the records\n";
+      m_logstring += "Red alert. Executable's size don't match the records";
       break;
     case EXE_HAS_BEEN_CHANGED:
-      m_logstring += "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n";
+      m_logstring += "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall";
       break;
     case SRCPORT_NOT_FOUND_IN_PROC:
-      m_logstring += "(source port not found in procfs) drop\n";
+      m_logstring += "(source port not found in procfs) drop";
       break;
     case INKERNEL_SOCKET_NOT_FOUND:
-      m_logstring += "(no process associated with socket) drop\n";
+      m_logstring += "(no process associated with socket) drop";
       break;
     case INKERNEL_IPADDRESS_NOT_IN_DLIST:
-      m_logstring += "(kernel process without a rule) drop\n";
+      m_logstring += "(kernel process without a rule) drop";
       break;
     case SOCKET_ZERO_BUT_UID_NOT_ZERO:
-      m_logstring += "(socket==0 but uid!=0) drop\n";
+      m_logstring += "(socket==0 but uid!=0) drop";
       break;
     case SOCKET_CHANGED_FROM_ZERO:
-      m_logstring += "(socket changed from zero while we were scanning) drop\n";
+      m_logstring += "(socket changed from zero while we were scanning) drop";
       break;
     case PROCFS_ERROR:
-      m_logstring += "(Couldn't find /proc/<pid>/stat entry) drop\n";
+      m_logstring += "(Couldn't find /proc/<pid>/stat entry) drop";
       break;
     default:
-      m_logstring += "unknown verdict detected \n";
-      printf ("verdict No %d \n", verdict);
+      m_logstring += "unknown verdict detected:" + to_string(verdict);
       break;
     }
-    cout << m_logstring;
+    log(m_logstring);
 }
 
 
@@ -2108,7 +2002,7 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   u_int64_t starttime;
   int ctmark;
 
-  cout << "nfq_handle - raddr: " << raddr << " laddr:" << laddr << "\n";
+  log("nfq_handle - raddr:" + string(raddr) + " laddr:" + string(laddr));
 
   // ihl field is IP header length in 32-bit words, multiply by 4 to get length in bytes
   u_int16_t lport_netbo, rport_netbo, lport_hostbo, rport_hostbo, sport, dport;
@@ -2153,7 +2047,7 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
     proto6_str = "UDP6";
   }
   else {
-    cout << "unknown protocol, dropping packet " << proto << "\n";
+    log("unknown protocol:"+to_string(proto)+" ,drop");
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
     _pthread_mutex_unlock(&nfq_handle_mutex);
     return 0;
@@ -2162,7 +2056,7 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   //Knowing only the local port, find full path of the process
   unsigned long socket_found;
   if ((socket_found = is_port_in_cache(lport_hostbo, proto)) == -1){
-    cout << "socket not found in cache \n";
+    log("socket not found in cache");
     if (build_port_and_socket_cache(socket_found, laddr, lport_hostbo, raddr,
                                     rport_hostbo, proto_str, direction) == 0) {
       //maybe it was IPv6 socket
@@ -2230,15 +2124,15 @@ execute_verdict:
     while (nfct_query(setmark_handle, NFCT_Q_GET, nf_ct) == -1) {
       if (errno == EBUSY) {
           //EBUSY returned, when there's too much activity in conntrack. Requery the packet
-          cout << "nfct_query GET error: " << strerror(errno) << "\n";
+          log("nfct_query GET error:" + string(strerror(errno)));
           break;
       }
       else if (errno == EILSEQ) {
-          cout << "nfct_query GET error: " << strerror(errno) << "\n";
+          log("nfct_query GET error:" + string(strerror(errno)));
           break;
       }
       else{
-          cout << "nfct_query GET error: " << strerror(errno) << "\n";
+          log("nfct_query GET error:" + string(strerror(errno)));
           break;
       }
     }
@@ -2255,37 +2149,15 @@ execute_verdict:
 }
 
 
-void init_log(){
-  if ( logging_facility == "file"){
-//         if (log_info) {
-//             if ((fileloginfofd = fopen(log_file, "w")) == 0) perror("fopen");
-//         }
-//         if (log_traffic) {
-//             if ((filelogtrafficfd = fopen(log_file, "w")) == 0) perror("fopen");
-//         }
-//         if (log_debug) {
-//             if ((filelogdebugfd = fopen(log_file, "w")) == 0) perror("fopen");
-//         };
-
-//all chennels log to the same file, if need be the commented section above can be used to specify separate files
-      fileloginfo_stream = _fopen (log_file.c_str(), "w" );
-      filelogtraffic_stream = fileloginfo_stream;
-      filelogdebug_stream = fileloginfo_stream;
-      m_printf = &m_printf_file;
-      return;
-    }
-  else if (logging_facility == "stdout")
-    {
-      m_printf = &m_printf_stdout;
-      return;
-    }
-#ifndef WITHOUT_SYSLOG
-  else if (logging_facility == "syslog")
-    {
-      openlog ( "lpfw", 0, 0 );
-      m_printf = &m_printf_syslog;
-    }
-#endif
+void log(string logstring){
+  if (logging_facility == "stdout"){
+    cout << logstring << '\n';
+  }
+  else if (logging_facility == "file"){
+    static ofstream log_to_file_stream(log_file);
+    log_to_file_stream << logstring << '\n';
+    log_to_file_stream.flush();
+  }
 }
 
 
@@ -2329,19 +2201,19 @@ void SIGTERM_handler ( int signal )
 int parse_command_line(int argc, char* argv[]){
   // Define argument table structs
   struct arg_str *arg_logging_facility = arg_str0(NULL,
-    "logging-facility", "<file>,<stdout>,<syslog>", "Divert logging to...(default stdout)" );
+    "logging-facility", "<file>,<stdout>", "Divert logging to...(default stdout)" );
   struct arg_file *arg_rules_file = arg_file0(NULL,
     "rules-file", "<path to file>", "Rules output file (default /etc/lpfw.rules)" );
   struct arg_file *arg_pid_file = arg_file0(NULL,
     "pid-file", "<path to file>", "PID output file (default /tmp/lpfw.pid)" );
   struct arg_file *arg_log_file = arg_file0(NULL,
     "log-file", "<path to file>", "Log output file (default /tmp/lpfw.log)");
-  struct arg_int *arg_log_info = arg_int0 (NULL,
-    "log-info", "<1/0 for yes/no>", "Info messages logging" );
-  struct arg_int *arg_log_traffic = arg_int0(NULL,
-    "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
-  struct arg_int *arg_log_debug = arg_int0(NULL,
-    "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
+//  struct arg_int *arg_log_info = arg_int0 (NULL,
+//    "log-info", "<1/0 for yes/no>", "Info messages logging" );
+//  struct arg_int *arg_log_traffic = arg_int0(NULL,
+//    "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
+//  struct arg_int *arg_log_debug = arg_int0(NULL,
+//    "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
   struct arg_lit *arg_test = arg_lit0(NULL,
     "test", "Run unit test" );
   struct arg_lit *arg_help = arg_lit0(NULL,
@@ -2349,9 +2221,9 @@ int parse_command_line(int argc, char* argv[]){
   struct arg_lit *arg_version = arg_lit0(NULL,
     "version", "Display the current version" );
   struct arg_end *end = arg_end ( 30 );
-  void *argtable[] = {arg_logging_facility, arg_rules_file, arg_pid_file,
-                      arg_log_file, arg_log_info, arg_log_traffic,
-                      arg_log_debug, arg_help, arg_version, arg_test, end};
+  void *argtable[] = {arg_logging_facility, arg_rules_file, arg_pid_file, arg_log_file,
+                      //arg_log_info, arg_log_traffic, arg_log_debug,
+                      arg_help, arg_version, arg_test, end};
 
   if ( arg_nullcheck ( argtable ) != 0 ){
     printf ( "Error parsing command line: insufficient memory\n" );
@@ -2377,15 +2249,15 @@ int parse_command_line(int argc, char* argv[]){
   if (arg_log_file->count == 1){
     log_file = string(arg_log_file->filename[0]);
   }
-  if (arg_log_info->count == 1){
-    log_info = bool(* ( arg_log_info->ival ));
-  }
-  if (arg_log_traffic->count == 1){
-    log_traffic = bool(* ( arg_log_traffic->ival ));
-  }
-  if (arg_log_debug->count == 1){
-    log_debug = bool(* ( arg_log_debug->ival ));
-  }
+//  if (arg_log_info->count == 1){
+//    log_info = bool(* ( arg_log_info->ival ));
+//  }
+//  if (arg_log_traffic->count == 1){
+//    log_traffic = bool(* ( arg_log_traffic->ival ));
+//  }
+//  if (arg_log_debug->count == 1){
+//    log_debug = bool(* ( arg_log_debug->ival ));
+//  }
   if ( arg_help->count == 1 ){
     printf ( "Leopard Flower:\n Syntax and help:\n" );
     arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
@@ -2397,9 +2269,6 @@ int parse_command_line(int argc, char* argv[]){
   }
   if (arg_test->count == 1){ //log traffic to a separate file
     bTestingMode = true;
-    logging_facility = "file";
-    log_traffic = true;
-    log_file = TEST_TRAFFIC_LOG;
   }
   arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
 }
@@ -2412,7 +2281,7 @@ void add_to_rulesfile(const char *exefile_path)
   string sha = get_sha256_hexdigest(exefile_path);
   //Open rules file and add to the bottom of it
   if ( access ( rules_file.c_str(), F_OK ) == -1 ){
-    printf ( "CONFIG doesnt exist..creating" );
+    log("CONFIG doesnt exist..creating");
     rulesfile_stream = _fopen (rules_file.c_str(), "w");
   }
   else {rulesfile_stream = _fopen (rules_file.c_str(), "a");}
@@ -2459,89 +2328,12 @@ void capabilities_setup()
   _cap_set_flag(cap_current, (cap_flag_t)CAP_PERMITTED, 3, caps_list, (cap_flag_value_t)CAP_SET);
   _cap_set_proc(cap_current);
 
-#ifdef DEBUG
   cap_t cap;
   cap = _cap_get_proc();
   printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
   _cap_free(cap);
-#endif
 }
 
-void setgid_lpfwuser()
-{
-  gid_t lpfwuser_gid;
-  //First we need to create/(check existence of) lpfwuser group and add ourselves to it
-  errno = 0;
-  struct group *m_group;
-  m_group = getgrnam("lpfwuser");
-  if (!m_group)
-    {
-      if (errno == 0)
-	{
-	  printf("lpfwuser group does not exist, creating...\n");
-	  if (system("groupadd lpfwuser") == -1)
-	    {
-	      printf("error in system(groupadd)\n");
-	      return;
-	    }
-	  //get group id again after group creation
-	  errno = 0;
-	  m_group = getgrnam("lpfwuser");
-	  if(!m_group)
-	    {
-	      if (errno == 0)
-		{
-		  printf ("lpfwuser group still doesn't exist even though we've just created it");
-		}
-	      else
-		{
-		  perror ("getgrnam");
-		}
-	    }
-	  lpfwuser_gid = m_group->gr_gid;
-	}
-      else
-	{
-	  printf("Error in getgrnam\n");
-	  perror ("getgrnam");
-	}
-      return;
-    }
-  //when debugging, we add user who launches frontend to lpfwuser group, hence disable this check
-#ifndef DEBUG
-  if (!(m_group->gr_mem[0] == NULL))
-    {
-      printf ("lpfwuser group contains users. This group should not contain any users. This is a security issue. Please remove all user from that group and restart application. Exitting\n");
-      exit(0);
-    }
-#endif
-  lpfwuser_gid = m_group->gr_gid;
-
-  capabilities_modify(CAP_SETGID, CAP_EFFECTIVE, CAP_SET);
-
-  //setgid and immediately remove CAP_SETGID from both perm. and eff. sets
-  if (setgid(lpfwuser_gid) == -1)
-    {
-      printf("setgid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-      return;
-    }
-
-  capabilities_modify(CAP_SETGID, CAP_EFFECTIVE, CAP_CLEAR);
-  capabilities_modify(CAP_SETGID, CAP_PERMITTED, CAP_CLEAR);
-}
-
-void setuid_root()
-{
-  capabilities_modify(CAP_SETUID, CAP_EFFECTIVE, CAP_SET);
-
-  //setuid and immediately remove CAP_SETUID from both perm. and eff. sets
-  if (setuid(0) == -1)
-    {
-      perror ("setuid ");
-      return;
-    }
-  capabilities_modify(CAP_SETUID, CAP_EFFECTIVE, CAP_CLEAR);
-}
 
 void setup_signal_handlers()
 {
@@ -2737,6 +2529,8 @@ void open_proc_net_files()
 
 int main ( int argc, char *argv[] )
 {
+  parse_command_line(argc, argv);
+
   struct rlimit core_limit; //limit for the core file size
   core_limit.rlim_cur = RLIM_INFINITY;
   core_limit.rlim_max = RLIM_INFINITY;
@@ -2749,13 +2543,9 @@ int main ( int argc, char *argv[] )
   printf("setrlimit: %s\nWarning: could not increase open file limit\n", strerror(errno));}
 
   capabilities_setup();
-  //setuid_root();
-  //setgid_lpfwuser();
   if (prctl(PR_SET_DUMPABLE, 1) == -1){ perror("prctl SET_DUMPABLE"); }
   setup_signal_handlers();
 
-  parse_command_line(argc, argv);
-  init_log();
   pidfile_check();
   if (!bTestingMode) {
     rules_load();
