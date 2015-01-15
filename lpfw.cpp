@@ -59,12 +59,15 @@ queue<string> requestQueue;
 struct nfq_handle *globalh_out, *globalh_in;
 
 //command line arguments available globally
-struct arg_str *logging_facility;
-struct arg_file *rules_file, *pid_file, *log_file, *allow_rule;
-struct arg_int *log_info, *log_traffic, *log_debug;
-struct arg_lit *test;
-//Paths of various frontends kept track of in order to chown&chmod them
-struct arg_file *cli_path, *gui_path, *pygui_path;
+//defaults are set here - they will be overwritten by commline args (if any)
+string logging_facility = "stdout";
+string rules_file = RULESFILE;
+string pid_file = PIDFILE;
+string log_file = LPFW_LOGFILE;
+bool log_info = true;
+bool log_traffic = true;
+bool log_debug = false;
+bool test = false;
 
 FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
 
@@ -375,32 +378,30 @@ int fe_active_flag_get()
 }
 
 
-int m_printf_stdout ( const int loglevel, const char * logstring )
-{
-  switch ( loglevel )
-    {
+int m_printf_stdout ( const int loglevel, const char * logstring ){
+  switch ( loglevel ){
     case MLOG_INFO:
       // check if INFO logging enabled
-      if ( !* ( log_info->ival ) ) return 0;
+      if (! log_info) return 0;
       printf ( "%s", logstring );
       return 0;
     case MLOG_TRAFFIC:
-      if ( !* ( log_traffic->ival ) ) return 0;
+      if (! log_traffic) return 0;
       printf ( "%s", logstring );
       return 0;
     case MLOG_DEBUG:
-      if ( !* ( log_debug->ival ) ) return 0;
+      if (! log_debug) return 0;
       printf ( "%s", logstring );
       return 0;
     case MLOG_DEBUG2:
 #ifdef DEBUG2
-      if ( !* ( log_debug->ival ) ) return 0;
+      if (! log_debug) return 0;
       printf ( "%s", logstring );
 #endif
       return 0;
     case MLOG_DEBUG3:
 #ifdef DEBUG3
-      if ( !* ( log_debug->ival ) ) return 0;
+      if (! log_debug) return 0;
       printf ( "%s", logstring );
 #endif
       return 0;
@@ -413,21 +414,19 @@ int m_printf_stdout ( const int loglevel, const char * logstring )
 
 
 //technically vfprintf followed by fsync should be enough, but for some reason on my system it can take more than 1 minute before data gets actually written to disk. So until the mystery of such a huge delay is solved, we use write() so data gets written to dist immediately
-int m_printf_file ( const int loglevel, const char * logstring )
-{
-  switch ( loglevel )
-    {
+int m_printf_file ( const int loglevel, const char * logstring ){
+  switch ( loglevel ){
     case MLOG_INFO:
       // check if INFO logging enabled
-      if ( !* ( log_info->ival ) ) return 0;
+      if (! log_info) return 0;
       write ( fileno ( fileloginfo_stream ), logstring, strlen ( logstring ) );
       return 0;
     case MLOG_TRAFFIC:
-      if ( !* ( log_traffic->ival ) ) return 0;
+      if (! log_traffic) return 0;
       write ( fileno ( filelogtraffic_stream ), logstring, strlen ( logstring ) );
       return 0;
     case MLOG_DEBUG:
-      if ( !* ( log_debug->ival ) ) return 0;
+      if (! log_debug) return 0;
       write ( fileno ( filelogdebug_stream ), logstring, strlen ( logstring ) );
       return 0;
     case MLOG_ALERT: //Alerts get logged unconditionally to all log channels
@@ -438,21 +437,19 @@ int m_printf_file ( const int loglevel, const char * logstring )
 
 
 #ifndef WITHOUT_SYSLOG
-int m_printf_syslog (const int loglevel, const char * logstring)
-{
-  switch ( loglevel )
-    {
+int m_printf_syslog (const int loglevel, const char * logstring){
+  switch ( loglevel ){
     case MLOG_INFO:
       // check if INFO logging enabled
-      if ( !* ( log_info->ival ) ) return 0;
+      if (! log_info) return 0;
       syslog ( LOG_INFO, "%s", logstring );
       return 0;
     case MLOG_TRAFFIC:
-      if ( !* ( log_traffic->ival ) ) return 0;
+      if (! log_traffic) return 0;
       syslog ( LOG_INFO, "%s", logstring );
       return 0;
     case MLOG_DEBUG:
-      if ( !* ( log_debug->ival ) ) return 0;
+      if (! log_debug) return 0;
       syslog ( LOG_INFO, "%s", logstring );
       return 0;
     case MLOG_ALERT: //Alerts get logget unconditionally to all log channels
@@ -979,7 +976,7 @@ void* thread_refresh ( void* ptr ){
 
 //Load rules from rulesfile at startup
 void rules_load(){
-  ifstream inputFile(rules_file->filename[0]);
+  ifstream inputFile(rules_file);
   string line;
   int pos;
   bool is_full_path_found = false;
@@ -1132,7 +1129,7 @@ void rules_write(bool mutex_being_held){
     }
     string_to_write += "\n";
   }
-  ofstream myfile(rules_file->filename[0]);
+  ofstream myfile(rules_file);
   myfile << string_to_write;
   myfile.close();
 }
@@ -2258,35 +2255,32 @@ execute_verdict:
 }
 
 
-void init_log()
-{
-
-  if ( !strcmp ( logging_facility->sval[0], "file" ) )
-    {
-//         if (log_info->ival) {
-//             if ((fileloginfofd = fopen(log_file->filename[0], "w")) == 0) perror("fopen");
+void init_log(){
+  if ( logging_facility == "file"){
+//         if (log_info) {
+//             if ((fileloginfofd = fopen(log_file, "w")) == 0) perror("fopen");
 //         }
-//         if (log_traffic->ival) {
-//             if ((filelogtrafficfd = fopen(log_file->filename[0], "w")) == 0) perror("fopen");
+//         if (log_traffic) {
+//             if ((filelogtrafficfd = fopen(log_file, "w")) == 0) perror("fopen");
 //         }
-//         if (log_debug->ival) {
-//             if ((filelogdebugfd = fopen(log_file->filename[0], "w")) == 0) perror("fopen");
+//         if (log_debug) {
+//             if ((filelogdebugfd = fopen(log_file, "w")) == 0) perror("fopen");
 //         };
 
 //all chennels log to the same file, if need be the commented section above can be used to specify separate files
-      fileloginfo_stream = _fopen (log_file->filename[0], "w" );
+      fileloginfo_stream = _fopen (log_file.c_str(), "w" );
       filelogtraffic_stream = fileloginfo_stream;
       filelogdebug_stream = fileloginfo_stream;
       m_printf = &m_printf_file;
       return;
     }
-  else if ( !strcmp ( logging_facility->sval[0], "stdout" ) )
+  else if (logging_facility == "stdout")
     {
       m_printf = &m_printf_stdout;
       return;
     }
 #ifndef WITHOUT_SYSLOG
-  else if ( !strcmp ( logging_facility->sval[0], "syslog" ) )
+  else if (logging_facility == "syslog")
     {
       openlog ( "lpfw", 0, 0 );
       m_printf = &m_printf_syslog;
@@ -2299,7 +2293,7 @@ void pidfile_check(){
   string pid_str;
   int pid_int;
   fstream pidfile;
-  pidfile.open(pid_file->filename[0]);
+  pidfile.open(pid_file);
   if (pidfile.is_open()) {  //file exists
     getline(pidfile, pid_str);
     pidfile.close();
@@ -2315,7 +2309,7 @@ void pidfile_check(){
     }
   }
   //else if pidfile doesn't exist/contains dead PID, create/truncate it and write our pid into it
-  pidfile.open(pid_file->filename[0], ios_base::out | ios_base::trunc);
+  pidfile.open(pid_file, ios_base::out | ios_base::trunc);
   pidfile << to_string((int)getpid());
   pidfile.close();
 }
@@ -2323,7 +2317,7 @@ void pidfile_check(){
 
 void SIGTERM_handler ( int signal )
 {
-  _remove ( pid_file->filename[0] );
+  _remove(pid_file.c_str());
   //release netfilter_queue resources
   _nfq_close ( globalh_out );
   printf ("In sigterm handler");
@@ -2331,121 +2325,83 @@ void SIGTERM_handler ( int signal )
   _system ("iptables -F");
 }
 
-/*command line parsing contributed by Ramon Fried*/
-int parse_command_line(int argc, char* argv[])
-{
-  // if the parsing of the arguments was unsuccessful
-  int nerrors;
 
+int parse_command_line(int argc, char* argv[]){
   // Define argument table structs
-  logging_facility = arg_str0 ( NULL, "logging-facility",
-#ifndef WITHOUT_SYSLOG
-				"<file>,<stdout>,<syslog>"
-#else
-				"<file>,<stdout>"
-#endif
-				, "Divert logging to..." );
-  rules_file = arg_file0 ( NULL, "rules-file", "<path to file>", "Rules output file" );
-  pid_file = arg_file0 ( NULL, "pid-file", "<path to file>", "PID output file" );
-  log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
-  allow_rule = arg_file0 ( NULL, "addrule", "<path to executable>", "Add executable to rulesfile as ALLOW ALWAYS" );
-
-
-#ifndef WITHOUT_SYSVIPC
-  cli_path = arg_file0 ( NULL, "cli-path", "<path to file>", "Path to CLI frontend" );
-  pygui_path = arg_file0 ( NULL, "pygui-path", "<path to file>", "Path to Python-based GUI frontend" );
-#endif
-
-  log_info = arg_int0 ( NULL, "log-info", "<1/0 for yes/no>", "Info messages logging" );
-  log_traffic = arg_int0 ( NULL, "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
-  log_debug = arg_int0 ( NULL, "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
-  test = arg_lit0 ( NULL, "test", "Run unit test" );
-
-  struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
-  struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
+  struct arg_str *arg_logging_facility = arg_str0(NULL,
+    "logging-facility", "<file>,<stdout>,<syslog>", "Divert logging to...(default stdout)" );
+  struct arg_file *arg_rules_file = arg_file0(NULL,
+    "rules-file", "<path to file>", "Rules output file (default /etc/lpfw.rules)" );
+  struct arg_file *arg_pid_file = arg_file0(NULL,
+    "pid-file", "<path to file>", "PID output file (default /tmp/lpfw.pid)" );
+  struct arg_file *arg_log_file = arg_file0(NULL,
+    "log-file", "<path to file>", "Log output file (default /tmp/lpfw.log)");
+  struct arg_int *arg_log_info = arg_int0 (NULL,
+    "log-info", "<1/0 for yes/no>", "Info messages logging" );
+  struct arg_int *arg_log_traffic = arg_int0(NULL,
+    "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
+  struct arg_int *arg_log_debug = arg_int0(NULL,
+    "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
+  struct arg_lit *arg_test = arg_lit0(NULL,
+    "test", "Run unit test" );
+  struct arg_lit *arg_help = arg_lit0(NULL,
+    "help", "Display help screen" );
+  struct arg_lit *arg_version = arg_lit0(NULL,
+    "version", "Display the current version" );
   struct arg_end *end = arg_end ( 30 );
-  void *argtable[] = {logging_facility, rules_file, pid_file, log_file, cli_path,
-      pygui_path, log_info, log_traffic, log_debug, allow_rule, help, version,
-      test, end};
+  void *argtable[] = {arg_logging_facility, arg_rules_file, arg_pid_file,
+                      arg_log_file, arg_log_info, arg_log_traffic,
+                      arg_log_debug, arg_help, arg_version, arg_test, end};
 
-  // Set default values
-  char *stdout_pointer;
-  stdout_pointer = (char*)_malloc(strlen("stdout")+1);
-  strcpy (stdout_pointer, "stdout");
-  logging_facility->sval[0] = stdout_pointer;
-
-  char *rulesfile_pointer;
-  rulesfile_pointer = (char*)_malloc(strlen(RULESFILE)+1);
-  strcpy (rulesfile_pointer, RULESFILE);
-  rules_file->filename[0] = rulesfile_pointer;
-
-  char *pidfile_pointer;
-  pidfile_pointer = (char*)_malloc(strlen(PIDFILE)+1);
-  strcpy (pidfile_pointer, PIDFILE);
-  pid_file->filename[0] = pidfile_pointer;
-
-  char *lpfw_logfile_pointer;
-  lpfw_logfile_pointer = (char*)_malloc(strlen(LPFW_LOGFILE)+1);
-  strcpy (lpfw_logfile_pointer, LPFW_LOGFILE);
-  log_file->filename[0] = lpfw_logfile_pointer;
-
-  * ( log_info->ival ) = 1;
-  * ( log_traffic->ival ) = 1;
-#ifdef DEBUG
-  * ( log_debug->ival ) = 1;
-#else
-  * ( log_debug->ival ) = 0;
-#endif
-
-  if ( arg_nullcheck ( argtable ) != 0 )
-    {
-      printf ( "Error: insufficient memory\n" );
-      exit(0);
-    }
-
-  nerrors = arg_parse ( argc, argv, argtable );
-
-  if ( nerrors == 0 )
-    {
-      if ( help->count == 1 )
-	{
-	  printf ( "Leopard Flower:\n Syntax and help:\n" );
-	  arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
-	  exit (0);
-	}
-      else if ( version->count == 1 )
-	{
-        printf ( "%s\n", "0.6" );
-	  exit (0);
-	}
-      else if (allow_rule->count == 1)
-      {
-	add_to_rulesfile(allow_rule->filename[0]);
-	exit(0);
-      }
-      else if (test->count == 1) //log traffic to a separate file
-      {
-  char *file_pointer = (char*)malloc(strlen("file")+1);
-	strcpy (file_pointer, "file");
-	logging_facility->sval[0] = file_pointer;
-
-	 * ( log_traffic->ival ) = 1;
-
-  char *log_file_pointer = (char *)malloc(strlen(TEST_TRAFFIC_LOG)+1);
-	strcpy (log_file_pointer, TEST_TRAFFIC_LOG);
-	log_file->filename[0] = TEST_TRAFFIC_LOG;
-      }
-    }
-  else if ( nerrors > 0 )
-    {
-      arg_print_errors ( stdout, end, "Leopard Flower" );
-      printf ( "Leopard Flower:\n Syntax and help:\n" );
-      arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
-      exit (1);
-    }
-
-  // Free memory - don't do this cause args needed later on
-  //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
+  if ( arg_nullcheck ( argtable ) != 0 ){
+    printf ( "Error parsing command line: insufficient memory\n" );
+    exit(0);
+  }
+  int nerrors = arg_parse ( argc, argv, argtable );
+  if ( nerrors > 0 ){
+    arg_print_errors ( stdout, end, "Leopard Flower" );
+    printf ( "Leopard Flower:\n Syntax and help:\n" );
+    arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
+    exit (1);
+  }
+  //else no parsing errors
+  if (arg_logging_facility->count == 1){
+    logging_facility = string(arg_logging_facility->sval[0]);
+  }
+  if (arg_rules_file->count == 1){
+    rules_file = string(arg_rules_file->filename[0]);
+  }
+  if (arg_pid_file->count == 1){
+    pid_file = string(arg_pid_file->filename[0]);
+  }
+  if (arg_log_file->count == 1){
+    log_file = string(arg_log_file->filename[0]);
+  }
+  if (arg_log_info->count == 1){
+    log_info = bool(* ( arg_log_info->ival ));
+  }
+  if (arg_log_traffic->count == 1){
+    log_traffic = bool(* ( arg_log_traffic->ival ));
+  }
+  if (arg_log_debug->count == 1){
+    log_debug = bool(* ( arg_log_debug->ival ));
+  }
+  if ( arg_help->count == 1 ){
+    printf ( "Leopard Flower:\n Syntax and help:\n" );
+    arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
+    exit (0);
+  }
+  if ( arg_version->count == 1 ){
+    printf ( "%s\n", "0.6" );
+    exit (0);
+  }
+  if (arg_test->count == 1){ //log traffic to a separate file
+    bTestingMode = true;
+    logging_facility = "file";
+    log_traffic = true;
+    log_file = TEST_TRAFFIC_LOG;
+  }
+  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
 }
 
 
@@ -2455,11 +2411,11 @@ void add_to_rulesfile(const char *exefile_path)
   FILE *rulesfile_stream;
   string sha = get_sha256_hexdigest(exefile_path);
   //Open rules file and add to the bottom of it
-  if ( access ( rules_file->filename[0], F_OK ) == -1 ){
+  if ( access ( rules_file.c_str(), F_OK ) == -1 ){
     printf ( "CONFIG doesnt exist..creating" );
-    rulesfile_stream = _fopen (rules_file->filename[0], "w");
+    rulesfile_stream = _fopen (rules_file.c_str(), "w");
   }
-  else {rulesfile_stream = _fopen (rules_file->filename[0], "a");}
+  else {rulesfile_stream = _fopen (rules_file.c_str(), "a");}
 
   _fseek (rulesfile_stream, 0, SEEK_END);
   _fputs (exefile_path, rulesfile_stream);
@@ -2747,36 +2703,36 @@ void open_proc_net_files()
 
 
 //Not in use. Obsolete but left here for reference
-void chown_and_setgid_frontend()
-{
-    char system_call_string[PATHSIZE];
+//void chown_and_setgid_frontend()
+//{
+//    char system_call_string[PATHSIZE];
 
-    //TODO check if we really need those 2 caps, maybe _CHOWN is enough.
-    capabilities_modify(CAP_CHOWN, CAP_EFFECTIVE, CAP_SET);
-    capabilities_modify(CAP_FSETID, CAP_EFFECTIVE, CAP_SET);
-    capabilities_modify(CAP_DAC_READ_SEARCH, CAP_EFFECTIVE, CAP_SET);
+//    //TODO check if we really need those 2 caps, maybe _CHOWN is enough.
+//    capabilities_modify(CAP_CHOWN, CAP_EFFECTIVE, CAP_SET);
+//    capabilities_modify(CAP_FSETID, CAP_EFFECTIVE, CAP_SET);
+//    capabilities_modify(CAP_DAC_READ_SEARCH, CAP_EFFECTIVE, CAP_SET);
 
-    strcpy (system_call_string, "chown :lpfwuser ");
-    strncat (system_call_string, cli_path->filename[0], PATHSIZE-20);
-    _system (system_call_string);
+//    strcpy (system_call_string, "chown :lpfwuser ");
+//    strncat (system_call_string, cli_path->filename[0], PATHSIZE-20);
+//    _system (system_call_string);
 
-    strcpy (system_call_string, "chmod g+s ");
-    strncat (system_call_string, cli_path->filename[0], PATHSIZE-20);
-    _system (system_call_string);
+//    strcpy (system_call_string, "chmod g+s ");
+//    strncat (system_call_string, cli_path->filename[0], PATHSIZE-20);
+//    _system (system_call_string);
 
-    strcpy (system_call_string, "chown :lpfwuser ");
-    strncat (system_call_string, pygui_path->filename[0], PATHSIZE-20);
-    _system (system_call_string);
+//    strcpy (system_call_string, "chown :lpfwuser ");
+//    strncat (system_call_string, pygui_path->filename[0], PATHSIZE-20);
+//    _system (system_call_string);
 
-    strcpy (system_call_string, "chmod g+s ");
-    strncat (system_call_string, pygui_path->filename[0], PATHSIZE-20);
-    _system (system_call_string);
+//    strcpy (system_call_string, "chmod g+s ");
+//    strncat (system_call_string, pygui_path->filename[0], PATHSIZE-20);
+//    _system (system_call_string);
 
-    capabilities_modify(CAP_CHOWN, CAP_EFFECTIVE, CAP_CLEAR);
-    capabilities_modify(CAP_CHOWN, CAP_PERMITTED, CAP_CLEAR);
-    capabilities_modify(CAP_FSETID, CAP_EFFECTIVE, CAP_CLEAR);
-    capabilities_modify(CAP_FSETID, CAP_PERMITTED, CAP_CLEAR);
-}
+//    capabilities_modify(CAP_CHOWN, CAP_EFFECTIVE, CAP_CLEAR);
+//    capabilities_modify(CAP_CHOWN, CAP_PERMITTED, CAP_CLEAR);
+//    capabilities_modify(CAP_FSETID, CAP_EFFECTIVE, CAP_CLEAR);
+//    capabilities_modify(CAP_FSETID, CAP_PERMITTED, CAP_CLEAR);
+//}
 
 
 int main ( int argc, char *argv[] )
@@ -2792,11 +2748,6 @@ int main ( int argc, char *argv[] )
   if(setrlimit(RLIMIT_NOFILE, &of_limit) < 0){
   printf("setrlimit: %s\nWarning: could not increase open file limit\n", strerror(errno));}
 
-  if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version"))){
-      parse_command_line(argc, argv);
-      return 0;
-  }
-
   capabilities_setup();
   //setuid_root();
   //setgid_lpfwuser();
@@ -2804,7 +2755,6 @@ int main ( int argc, char *argv[] )
   setup_signal_handlers();
 
   parse_command_line(argc, argv);
-  if (test->count == 1) bTestingMode = true;
   init_log();
   pidfile_check();
   if (!bTestingMode) {
