@@ -13,13 +13,6 @@ using namespace std;
 
 void die_syscall(string message);
 
-//macros enables any thread to use logging concurrently
-#define M_PRINTF(loglevel, ...) \
-    //pthread_mutex_lock(&logstring_mutex);
-    //cout << "LOG:" << logstring << "\n";
-    //pthread_mutex_unlock(&logstring_mutex);
-
-
 struct rule{
   string path; //path to executable
   string pid; //its pid (or IP address for kernel processes)

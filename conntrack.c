@@ -145,7 +145,7 @@ void* tcp_export_thread ( void *ptr ) {
     sin.sin_family == AF_INET && addrlen == sizeof(sin)) {
     local_port = ntohs(sin.sin_port);
   }
-  log("Conntrack port:"+to_string(local_port));
+  log("INFO:Conntrack port:"+to_string(local_port));
   ofstream myfile("/tmp/lpfwctport");
   myfile << std::to_string(local_port);
   myfile.close();
@@ -185,7 +185,7 @@ int ct_delete_mark_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,
       printf("Error: nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return NFCT_CB_CONTINUE;
     }
-    log("deleted ct mark:"+to_string(mark));
+    log("DEBUG:deleted ct mark:"+to_string(mark));
     return NFCT_CB_CONTINUE;
   }
   return NFCT_CB_CONTINUE;
@@ -243,9 +243,9 @@ int ct_destroy_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void
     out_bytes = nfct_get_attr_u64(mct, ATTR_ORIG_COUNTER_BYTES);
     in_bytes = nfct_get_attr_u64(mct, ATTR_REPL_COUNTER_BYTES);
     if (in_bytes != 0 && out_bytes != 0){
-      log("Error: conntrack with mark 0 detected with leaked bytes");
-      log("src_addr:"+to_string(src_addr));
-      log("dst_addr:"+to_string(dst_addr));
+      log("DEBUG:Error: conntrack with mark 0 detected with leaked bytes");
+      log("DEBUG:src_addr:"+to_string(src_addr));
+      log("DEBUG:dst_addr:"+to_string(dst_addr));
       //TODO figure out a long-term solution for this rare problem
       //abort();
     }
@@ -271,10 +271,10 @@ scan_again:
   if (!scanned_twice){
     scanned_twice = true;
     sleep(1);
-    log("************Scanning again in ct_destroy_cb");
+    log("DEBUG:*********Scanning again in ct_destroy_cb");
     goto scan_again;
   }
-  log("Error: unknown conntrack mark in ct_destroy_cb even after scanning again:"+to_string(mark));
+  log("DEBUG:Error: unknown conntrack mark in ct_destroy_cb even after scanning again:"+to_string(mark));
   return NFCT_CB_CONTINUE;
   //TODO this error should be logged with a dump and analyzed
 }
@@ -365,7 +365,7 @@ void * thread_ct_dump( void *ptr)
       ctmsgQueue.push(export_string);
       prev_export_string = export_string;
       if (conntrack_send_anyway) {
-        log("toggling conntrack_send_anyway to false");
+        log("DEBUG:toggling conntrack_send_anyway to false");
         conntrack_send_anyway = false;}
     }
   sleep(1);
