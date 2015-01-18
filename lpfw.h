@@ -30,12 +30,6 @@ int build_udp6_port_and_socket_cache(long &socket_out, const int port_in);
 unsigned long is_port_in_cache(const int port, const int proto);
 unsigned long is_udp_port_in_cache(const int port);
 
-//find socket in pid_and_socket cache of active rules only and return path,pid,ctmark if found
-int search_pid_and_socket_cache(const long socket_in, string &path_out,
-                                    string &pid_out, int &ctmark_out);
-//build a correlation of pid to socket of only the active rules, excluding inkernel rules
-void* thread_build_pid_and_socket_cache ( void *ptr );
-
 //thread-safe getter and setter for fe_active_flag
 int fe_active_flag_get();
 void fe_active_flag_set (const unsigned char boolean);

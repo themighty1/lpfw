@@ -76,7 +76,7 @@ vector<rule> rules; //each rule contains path,permission,hash
 //mutex to protect ruleslist
 pthread_mutex_t rules_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-pthread_t refresh_thr, nfq_out_thr, nfq_in_thr, cache_build_thr, tcp_server_thr, test_thr;
+pthread_t refresh_thr, nfq_out_thr, nfq_in_thr, tcp_server_thr, test_thr;
 
 //flag which shows whether frontend is running
 bool bFrontendActive = false;
@@ -92,14 +92,9 @@ int tcpinfo_fd, tcp6info_fd, udpinfo_fd, udp6info_fd, procnetrawfd;
 //track time when last packet was seen to put to sleep some threads when there is no traffic
 struct timeval lastpacket = {0};
 pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t tcp_port_and_socket_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t udp_port_and_socket_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //for debug purposed - how many times read() was called
 int tcp_stats, udp_stats;
-//cache that holds correlation of ports<-->sockets from various /proc/net/* files
-int tcp_port_and_socket_cache[MEMBUF_SIZE], udp_port_and_socket_cache[MEMBUF_SIZE],
-tcp6_port_and_socket_cache[MEMBUF_SIZE], udp6_port_and_socket_cache[MEMBUF_SIZE];
 bool awaiting_reply_from_fe = false; //true when expecting a reply from frontend
 bool bTestingMode = false;
 int ctmark_to_set;
@@ -179,8 +174,6 @@ void capabilities_modify(const int capability, const int set, const int action)
     _cap_set_proc(cap_current);
 }
 
-//called when a port could not be found in previous cache
-//so we build a new cache while at the same time looking for the port
 
 //Note that Linux allows multiple sockets to share the same local port using SO_REUSEPORT
 //This is primarily intended for servers
@@ -188,7 +181,7 @@ void capabilities_modify(const int capability, const int set, const int action)
 //are trying to establish a new connection to the same host:port,
 //there will be no way for this function to distinguish which of them sent the packet.
 //For now this function picks the first matching socket
-int build_port_and_socket_cache(unsigned long &socket_out, const string localaddr, const int localport,
+int find_socket(unsigned long &socket_out, const string localaddr, const int localport,
                                 const string remoteaddr, const int remoteport, const string proto,
                                 const int direction) {
     char rawbuf[4096];
@@ -198,60 +191,34 @@ int build_port_and_socket_cache(unsigned long &socket_out, const string localadd
     char rport[5] = {0};
     char state[3] = {0};
     string ip6loopback = "00000000000000000000000000000001";
-    int bytesread, i, procnet_fd, *cache;
+    int bytesread, i, procnet_fd;
     bool bSocketFound = false;
     long socket;
     FILE *procnet_file;
-    pthread_mutex_t mutex;
     if (proto == "TCP") {
       procnet_file = tcpinfo;
       procnet_fd = tcpinfo_fd;
-      cache = tcp_port_and_socket_cache;
-      mutex = tcp_port_and_socket_cache_mutex;
     }
     else if (proto == "TCP6") {
       procnet_file = tcp6info;
       procnet_fd = tcp6info_fd;
-      cache = tcp6_port_and_socket_cache;
     }
     else if (proto == "UDP") {
       procnet_file = udpinfo;
       procnet_fd = udpinfo_fd;
-      cache = udp_port_and_socket_cache;
-      mutex = udp_port_and_socket_cache_mutex;
     }
     else if (proto == "UDP6") {
       procnet_file = udp6info;
       procnet_fd = udp6info_fd;
-      cache = udp6_port_and_socket_cache;
     }
     i = 0;
     _fseek(procnet_file,0,SEEK_SET);
 
     //convert *_in args into procnet* format e.g. 127.0.0.1:21787 looks  0100007F:551B
-    vector<string>saddr_parts = split_string(localaddr, ".");
-    std::stringstream saddr_ss;
-    for (int p = saddr_parts.size()-1 ; p >= 0; --p){
-      saddr_ss << std::uppercase << std::hex << std::setfill('0') <<
-                  std::setw(2) << stoi(saddr_parts[p]);
-    }
-    string saddr_in_procnet(saddr_ss.str());
-    vector<string>daddr_parts = split_string(remoteaddr, ".");
-    std::stringstream daddr_ss;
-    for (int q = daddr_parts.size()-1 ; q >= 0; --q){
-      daddr_ss << std::uppercase << std::hex << std::setfill('0') <<
-                  std::setw(2) << stoi(daddr_parts[q]);
-    }
-    string daddr_in_procnet(daddr_ss.str());
     std::stringstream sport_ss;
     sport_ss << std::uppercase << std::hex << std::setfill('0') <<
                 std::setw(4) << localport;
     string sport_in_procnet(sport_ss.str());
-    std::stringstream dport_ss;
-    dport_ss << std::uppercase << std::hex << std::setfill('0') <<
-                std::setw(4) << remoteport;
-    string dport_in_procnet(dport_ss.str());
-
 
     string debugdata;
     string debugfilename;
@@ -259,7 +226,6 @@ int build_port_and_socket_cache(unsigned long &socket_out, const string localadd
     //per one read operation. Moreover /proc/net/* is smart enough to feed the line
     //up to /r/n and not give you part of the line, so each read will end with /r/n
 
-    _pthread_mutex_lock(&mutex);
     bool bFirstLine = true;
     while ((bytesread = read(procnet_fd, rawbuf, 4096)) > 0) {
       rawbuf[bytesread] = 0; //terminating 0 just in case
@@ -291,28 +257,19 @@ int build_port_and_socket_cache(unsigned long &socket_out, const string localadd
           //state 07: listening for UDP
           continue;}
         }
-
         if (socket == 0){
           log("socket == 0");
-          goto dump_debug;}
-
+          goto dump_debug;
+        }
         if(  ((proto == "TCP" || proto == "UDP") && (raddr[6] == '7' && raddr[7] == 'F')) ||
              ((proto == "TCP6" || proto == "UDP6") && (string(raddr) == ip6loopback))){
             //0x7F == 127, for IP6 ::1 is loopback
             //we're not interested in destinations within localhost IP range
             continue;}
 
-        std::stringstream ss;
-        ss << lport;
-        ss << std::hex;
-        int sport_int;
-        ss >> sport_int;
-
-        cache[i*2] = (unsigned long) sport_int;
-        cache[i*2+1] = socket;
         if (lport == sport_in_procnet){
           //TODO: assert here that raddr:rport = 0 because this is a listening socket
-          //it must not know it's peer at this point
+          //it must not know its peer at this point
           if (bSocketFound){
             log("DEBUG:Duplicate connection detected");
             //goto dump_debug;
@@ -324,9 +281,9 @@ int build_port_and_socket_cache(unsigned long &socket_out, const string localadd
       }
       i += j;
     }
-    if (bytesread == -1) { die(strerror(errno)); }
-    cache[i*2] = (unsigned long)MAGIC_NO;
-    _pthread_mutex_unlock(&mutex);
+    if (bytesread == -1){
+      die(strerror(errno));
+    }
     if (!bSocketFound) {
       //writing debug data only when socket not found
       ofstream debugfile(debugfilename, ios::out | ios::binary);
@@ -534,60 +491,6 @@ int search_pid_and_socket_cache(const long socket_in, string &path_out,
     }
   }
   return SOCKET_IN_CACHE_NOT_FOUND;
-}
-
-
-//Build the cache of proc/PID/fd sockets for all running processes which
-//lpfw keeps track of. The likelihood is very high that a new connection
-//request will be made by a process which lpfw already keeps track of.
-//Thus we can save some CPU, whereas otherwise we'd have to scan each
-// <PID>/fd in the whole /proc/ tree
-void* thread_build_pid_and_socket_cache ( void *ptr ){
-  char proc_pid_exe[32];
-  string proc_pid_fd_path;
-  struct timespec refresh_timer;
-  refresh_timer.tv_sec=0;
-  refresh_timer.tv_nsec=1000000000/4;
-  struct dirent *m_dirent;
-  struct timeval time;
-  int delta;
-
-  while (true) {
-    while(nanosleep(&refresh_timer, &refresh_timer));
-    gettimeofday(&time, NULL);
-    _pthread_mutex_lock(&lastpacket_mutex);
-    delta = time.tv_sec - lastpacket.tv_sec;
-    _pthread_mutex_unlock(&lastpacket_mutex);
-    //preserve CPU cycles and don't build the cache if it's
-    //been more than 1 second since the last new connection was detected
-    if (delta > 1) continue;
-
-    _pthread_mutex_lock ( &rules_mutex );
-    for(int i = 0; i < rules.size(); i++){
-      if (! rules[i].is_active || rules[i].path == KERNEL_PROCESS) continue;
-      rules[i].sockets.clear();
-      rewinddir(rules[i].dirstream);
-      errno=0;
-      int j = 0;
-      while (m_dirent = readdir ( rules[i].dirstream )){
-        proc_pid_fd_path = rules[i].pidfdpath + m_dirent->d_name;
-        memset (proc_pid_exe, 0 , sizeof(proc_pid_exe));
-        if (readlink ( proc_pid_fd_path.c_str(), proc_pid_exe, SOCKETBUFSIZE ) == -1) {  //not a symlink but . or ..
-          errno=0;
-          continue;
-        }
-        if (proc_pid_exe[7] != '[') continue; //not a socket
-        char *end;
-        end = strrchr(&proc_pid_exe[8],']'); //put 0 instead of ]
-        *end = 0;
-        rules[i].sockets.push_back(atol(&proc_pid_exe[8]));
-        j++;
-      } //while (m_dirent = readdir ( rule->dirstream ))
-      if (errno==0) continue; //readdir reached EOF, thus errno hasn't changed from 0
-      else die();
-    }
-    _pthread_mutex_unlock ( &rules_mutex );
-  } // while(true)
 }
 
 
@@ -1680,12 +1583,6 @@ int socket_handle ( const long socket_in, int &ctmark_out, string &path_out,
                     string &pid_out, u_int64_t &stime_out, int srctcp){
 //the last arg srctcp is used for debug purposes only
   int retval;
-  retval = search_pid_and_socket_cache(socket_in, path_out, pid_out, ctmark_out);
-  if (retval != SOCKET_IN_CACHE_NOT_FOUND){
-    log("DEBUG:found in pid and socket cache");
-    if (bTestingMode) assert (strstr(path_out.c_str(), "/tmp/lpfwtest/testprocess") != NULL);
-    return retval;
-  }
   retval = socket_active_processes_search ( socket_in, path_out, pid_out, ctmark_out );
   if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND ){
     if (bTestingMode) assert (strstr(path_out.c_str(), "/tmp/lpfwtest/testprocess") != NULL);
@@ -1713,51 +1610,6 @@ int socket_handle ( const long socket_in, int &ctmark_out, string &path_out,
     return retval;
   }
   assert (false); //should never get here
-}
-
-
-//This cache of port<-->socket pairs is built in a loop by
-//thread_build_pid_and_socket_cache
-unsigned long is_port_in_cache (const int port, const int proto)
-{
-  pthread_mutex_t mutex;
-  int *cache, *cache6;
-  if (proto == PROTO_TCP){
-    mutex = tcp_port_and_socket_cache_mutex;
-    cache = tcp_port_and_socket_cache;
-    cache6 = tcp6_port_and_socket_cache;
-  }
-  else if (proto == PROTO_UDP) {
-    mutex = udp_port_and_socket_cache_mutex;
-    cache = udp_port_and_socket_cache;
-    cache6 = udp6_port_and_socket_cache;
-  }
-
-  int i = 0;
-  int retval;
-  _pthread_mutex_lock(&mutex);
-  while (cache[i*2] != (unsigned long)MAGIC_NO) {
-    if (i >= (MEMBUF_SIZE / (sizeof(unsigned long)*2)) - 1) break;
-    if (cache[i*2] != port) {
-      i++;
-      continue;
-    }
-    _pthread_mutex_unlock(&mutex);
-    return cache[i*2+1];
-  }
-  _pthread_mutex_unlock(&mutex);
-  i = 0;
-  while (cache6[i*2] != (unsigned long)MAGIC_NO) {
-    if (i >= (MEMBUF_SIZE / (sizeof(unsigned long)*2)) - 1) break;
-    if (cache6[i*2] != port) {
-      i++;
-      continue;
-    }
-    if (bTestingMode) assert(false);
-    return cache6[i*2+1];
-  }
-  //socket wasn't found
-  return -1;
 }
 
 
@@ -2044,16 +1896,13 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 
   //Knowing only the local port, find full path of the process
   unsigned long socket_found;
-  if ((socket_found = is_port_in_cache(lport_hostbo, proto)) == -1){
-    log("DEBUG:socket not found in cache");
-    if (build_port_and_socket_cache(socket_found, laddr, lport_hostbo, raddr,
-                                    rport_hostbo, proto_str, direction) == 0) {
-      //maybe it was IPv6 socket
-      if (build_port_and_socket_cache(socket_found, laddr, lport_hostbo, raddr,
-                                      rport_hostbo, proto6_str, direction) == 0) {
-            verdict = LOCALPORT_NOT_FOUND_IN_PROCNET;
-            goto execute_verdict;
-      }
+  if (find_socket(socket_found, laddr, lport_hostbo, raddr,
+                                  rport_hostbo, proto_str, direction) == 0) {
+    //maybe it was IPv6 socket
+    if (find_socket(socket_found, laddr, lport_hostbo, raddr,
+                                    rport_hostbo, proto6_str, direction) == 0) {
+          verdict = LOCALPORT_NOT_FOUND_IN_PROCNET;
+          goto execute_verdict;
     }
   }
   assert (socket_found > 0);
@@ -2556,7 +2405,6 @@ int main ( int argc, char *argv[] )
   init_nfqueue();
 
   _pthread_create ( &refresh_thr, (pthread_attr_t *)NULL, thread_refresh, (void *)NULL );
-  _pthread_create ( &cache_build_thr, (pthread_attr_t *)NULL, thread_build_pid_and_socket_cache, (void *)NULL);
   _pthread_create ( &tcp_server_thr, (pthread_attr_t *)NULL, thread_tcp_server,(void *)NULL);
   if (bTestingMode) {
     _pthread_create ( &test_thr, (pthread_attr_t *)NULL, thread_test,(void *)NULL);
