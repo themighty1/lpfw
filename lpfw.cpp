@@ -367,7 +367,12 @@ int ruleslist_add( const string path, const string pid, const string perms,
   newrule.is_active = active;
   newrule.stime = stime;
   //rules added by frontend dont have their sha
-  if (sha == "") { newrule.sha = get_sha256_hexdigest(path); }
+  if (sha == "") {
+    string retval = get_sha256_hexdigest(path);
+    if (retval == "CANT_READ_EXE") return CANT_READ_EXE;
+    //else
+    newrule.sha = retval;
+  }
   else { newrule.sha = sha; }
   if (ctmark == 0) {
     vector<u_int32_t>ctmarks = get_ctmarks();
@@ -958,6 +963,7 @@ int path_find_in_rules ( int &ctmark_out, const string path_in,
     //A rule which was loaded on startup has seen its first packet
     rule loaded_rule = rulesWithTheSamePath[0];
     string sha = get_sha256_hexdigest(loaded_rule.path.c_str());
+    if (sha == "CANT_READ_EXE") {return CANT_READ_EXE; }
     if (loaded_rule.sha != sha) {return SHA_DONT_MATCH; }
     _pthread_mutex_lock ( &rules_mutex );
     bool bRuleFound = false;
@@ -1041,6 +1047,7 @@ int path_find_in_rules ( int &ctmark_out, const string path_in,
     //we get here when we have a new instance,
     //check that instance launched from unmodified binary
     string sha = get_sha256_hexdigest(path_in.c_str());
+    if (sha == "CANT_READ_EXE") {return CANT_READ_EXE; }
     if (sha != rulesWithTheSamePath[0].sha ) {return SHA_DONT_MATCH; }
     // A1. Are there any rules with the same PATH as NP AND *ALWAYS perms? If yes,
     // then create new rule, copy parent's attributes over to NP and continue;
@@ -2112,29 +2119,6 @@ int parse_command_line(int argc, char* argv[]){
     bTestingMode = true;
   }
   arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
-}
-
-
-//add an executable (from command line) with ALLOW ALWAYS permissions
-void add_to_rulesfile(const char *exefile_path)
-{
-  FILE *rulesfile_stream;
-  string sha = get_sha256_hexdigest(exefile_path);
-  //Open rules file and add to the bottom of it
-  if ( access ( rules_file.c_str(), F_OK ) == -1 ){
-    log("INFO:CONFIG doesnt exist..creating");
-    rulesfile_stream = _fopen (rules_file.c_str(), "w");
-  }
-  else {rulesfile_stream = _fopen (rules_file.c_str(), "a");}
-
-  _fseek (rulesfile_stream, 0, SEEK_END);
-  _fputs (exefile_path, rulesfile_stream);
-  _fputc ('\n', rulesfile_stream);
-  _fputs (ALLOW_ALWAYS, rulesfile_stream);
-  _fputc ('\n', rulesfile_stream);
-  _fputs (sha.c_str(), rulesfile_stream);
-  _fputc ('\n', rulesfile_stream);
-  _fclose (rulesfile_stream);
 }
 
 
