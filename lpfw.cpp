@@ -330,6 +330,8 @@ unsigned long long starttimeGet ( const int mypid ) {
 }
 
 
+//TODO security. there is a small window of opportunity for the attacker to kill the PID
+//while we are in this function. After adding the rule, check again.
 int ruleslist_add( const string path, const string pid, const string perms,
                    const bool active, const string sha, const unsigned long long stime,
                    const int ctmark, const bool first_instance){
@@ -609,30 +611,25 @@ void tcp_server_process_messages(int newsockfd) {
       string perms = string_parts[3];
       if (sent_path != string_parts[1] || sent_pid != pid){
         die("Expected " + sent_path + " but got " + path);}
-      if (perms == "IGNORED") set_awaiting_reply_from_fe(false);
+      if (perms == "IGNORED"){
+        set_awaiting_reply_from_fe(false);
+        continue;
+      }
       else if (path == "KERNEL_PROCESS"){
         ruleslist_add(KERNEL_PROCESS, pid, perms, TRUE, "", 0, 0 ,TRUE);
       }
       else {
-        string procpath = "/proc/" + pid + "/exe";
-        char exepathbuf[PATHSIZE];
-        string sha;
-        memset ( exepathbuf, 0, PATHSIZE );
-        readlink (procpath.c_str(), exepathbuf, PATHSIZE-1 );
-        if (exepathbuf != path){
+        //Even if we check that proc/<PID>/exe matches and sha256 matches,
+        //with executables like python, the attacker could kill the initial process,
+        //recycle the PID and start a rogue python script (its exepath&sha256 would match)
+        //Only a matching stime can mitigiate that because it is impossible
+        //to launch 2 processes with the same stime and the same PID
+        unsigned long long stime = starttimeGet(atoi(sent_pid.c_str()));
+        if (atoi(sent_stime.c_str()) != stime ){
           log("DEBUG:Frontend asked to add a process that is no longer running");
           set_awaiting_reply_from_fe(false);
           continue;
         }
-//TODO should move stime check to ruleslist_add
-//         unsigned long long stime;
-//         stime = starttimeGet(atoi(pid));
-//         if ( sent_to_fe_struct.stime != stime ){
-//           log("Red alert!!!Start times don't match");
-//            throw "Red alert!!!Start times don't match";
-//           awaiting_reply_from_fe = FALSE;
-//         }
-       //TODO SECURITY.Check that /proc/PID inode wasn't changed while we were shasumming and exesizing
        ruleslist_add(path, pid, perms, true, "", atoi(sent_stime.c_str()), 0 ,TRUE);
        set_awaiting_reply_from_fe(false);
        requestQueue = queue<string>(); //clear the queue
@@ -1163,10 +1160,9 @@ int socket_procpidfd_search ( const long mysocket_in, string &m_path_out,
       if (find_socket != socketbuf) continue;
       //else we found our socket!!!!
       path = "/proc/" + string(proc_dirent->d_name) + "/exe";
-      try {
-        stime_out  = starttimeGet ( atoi ( proc_dirent->d_name ) );
-        size = _readlink ( path.c_str(), exepathbuf, PATHSIZE - 1 );
-      } catch (...){
+      stime_out  = starttimeGet ( atoi ( proc_dirent->d_name ) );
+      size = readlink ( path.c_str(), exepathbuf, PATHSIZE - 1 );
+      if (size == -1){
         _closedir ( fd_DIR );
         _closedir ( proc_DIR );
         return SOCKET_NOT_FOUND_IN_PROCPIDFD;//the process exited as we were querying
