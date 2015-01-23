@@ -254,9 +254,12 @@ int find_socket(unsigned long &socket_out, const string localaddr, const int loc
           continue;}
         }
         if (proto == "UDP" || proto == "UDP6"){
-          if( (direction == DIRECTION_OUT && !(state[0] == '0' && state[1] == '7')) ||
-              (direction == DIRECTION_IN && !(state[0] == '0' && state[1] == '7')) ){
+          if(  (direction == DIRECTION_OUT &&
+               !( state[0] == '0' && (state[1] == '7' || state[1] == '1')  )  )
+              || (direction == DIRECTION_IN && !(state[0] == '0' && state[1] == '7')) ){
           //state 07: listening for UDP
+          //however if we bind to a remote host even without actually sending any data
+          //then the state is 01
           continue;}
         }
         if (socket == 0){
