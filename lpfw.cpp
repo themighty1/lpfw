@@ -97,6 +97,8 @@ pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 int tcp_stats, udp_stats;
 bool awaiting_reply_from_fe = false; //true when expecting a reply from frontend
 bool bTestingMode = false;
+bool bTestingMode2 = false;
+bool iptablesChangeDetected = false;
 int ctmark_to_set;
 extern struct nfct_handle *setmark_handle;
 bool conntrack_send_anyway = false; //used to tell ct thread to send stats even if there
@@ -407,7 +409,7 @@ int ruleslist_add( const string path, const string pid, const string perms,
   rules.push_back(newrule);
   _pthread_mutex_unlock ( &rules_mutex );
   if (perms == ALLOW_ALWAYS || perms == DENY_ALWAYS) {
-    rules_write();
+    rules_save();
   }
   return retctmark;
 }
@@ -442,7 +444,7 @@ void ruleslist_delete_all ( const string path) {
   _pthread_mutex_unlock ( &rules_mutex );
   if (! bRulesChanged) die(); //couldnt find the rule
   if (bNeedToWriteRulesfile){
-    rules_write();}
+    rules_save();}
   if (bFrontendActive) {
     send_rules();}
 }
@@ -606,7 +608,7 @@ void tcp_server_process_messages(int newsockfd) {
       ruleslist_delete_all(path);
     }
     else if (comm == "WRITE"){ //Not in use
-      rules_write();
+      rules_save();
     }
     else if (comm == "ADD"){ //ADD path pid perms
       log("DEBUG:ADDing a rule ");
@@ -739,7 +741,7 @@ void* thread_refresh ( void* ptr ){
            if (rules[j].perms != rules[i].perms) continue;
            bFoundAnotherOne = true;
            ruleslist_delete_one ( rules[i].path, rules[i].pid );
-           rules_write(true);
+           rules_save(true);
            thisIterationHadAnUpdate = true;
            break;
          }
@@ -867,7 +869,7 @@ void rules_load(){
 //iterate over rulescopy removing all rules which are not *ALWAYS
 //or which are duplicates of other *ALWAYS rules with the same path
 //this will leave us with rulescopy with unique *ALWAYS rules
-void rules_write(bool mutex_being_held){
+void rules_save(bool mutex_being_held){
   if (!mutex_being_held) _pthread_mutex_lock ( &rules_mutex );
   vector<rule> rulescopy = rules;
   if (!mutex_being_held) _pthread_mutex_unlock ( &rules_mutex );
@@ -889,37 +891,7 @@ void rules_write(bool mutex_being_held){
     }
   }
   //write rules
-  string string_to_write =
-      "\n"
-      "# Leopard Flower personal firewall rules list\n"
-      "# lines startng with # are comments and will be ignored\n"
-      "# blank line is used to separate individual rules\n"
-      "# (Each parameter must have one or more spaces after the = sign and terminate with a newline)\n"
-      "\n"
-      "# Mandatory parameters (strictly in this order):\n"
-      "# full_path= followed by the full path to the executable\n"
-      "# permission= followed by either ALLOW_ALWAYS or DENY_ALWAYS\n"
-      "# sha256_hexdigest= followed by sha256 UPPERCASE hexdigest with any leading zeroes\n"
-      "# Optional parameters:\n"
-      "# conntrack_mark= followed by an integer\n"
-      "# (conntrack_mark can be manually assigned by the user in this file. This will enable the user\n"
-      "# to create more complex netfilter rules for the application, e.g. rate-limiting, IP/port blocking etc\n"
-      "# conntrack_mark set here will be used for outgoing connections\n"
-      "# for incoming connections conntrack_mark+10000 will be used)\n"
-      "\n"
-      "# Make sure there is a blank line at the end of this file\n"
-      "\n"
-      "# Example rules list:\n"
-      "# full_path=        /home/myusername/app1\n"
-      "# permission=       ALLOW_ALWAYS\n"
-      "# sha256_hexdigest= 3719407990275C319C882786125B1F148CC163FA3BF4C7712092034BBA06CE4D\n"
-      "# conntrack_mark=   11443\n"
-      "\n"
-      "# full_path=        /home/myusername/app2\n"
-      "# permission=       ALLOW_ALWAYS\n"
-      "# sha256_hexdigest= 9AF0F74366D0B3D1415AB6DF5D7E2429BF5CB5AC901B5ECFCC3DD51DA4B83D75\n"
-      "\n";
-
+  string string_to_write = rulesfile_header;
   for(i = 0; i < rulescopy.size(); i++){
     string_to_write += "full_path=        " + rulescopy[i].path + "\n";
     string_to_write += "permission=       " + rulescopy[i].perms + "\n";
@@ -2064,6 +2036,8 @@ int parse_command_line(int argc, char* argv[]){
     "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
   struct arg_lit *arg_test = arg_lit0(NULL,
     "test", "Run unit test" );
+  struct arg_lit *arg_test2 = arg_lit0(NULL,
+    "test2", "Run unit test. Will take over the machine's connection" );
   struct arg_lit *arg_help = arg_lit0(NULL,
     "help", "Display help screen" );
   struct arg_lit *arg_version = arg_lit0(NULL,
@@ -2071,7 +2045,7 @@ int parse_command_line(int argc, char* argv[]){
   struct arg_end *end = arg_end ( 30 );
   void *argtable[] = {arg_logging_facility, arg_rules_file, arg_pid_file, arg_log_file,
                       arg_log_info, arg_log_traffic, arg_log_debug,
-                      arg_help, arg_version, arg_test, end};
+                      arg_help, arg_version, arg_test, arg_test2, end};
 
   if ( arg_nullcheck ( argtable ) != 0 ){
     printf ( "Error parsing command line: insufficient memory\n" );
@@ -2115,8 +2089,18 @@ int parse_command_line(int argc, char* argv[]){
     printf ( "%s\n", "0.6" );
     exit (0);
   }
-  if (arg_test->count == 1){ //log traffic to a separate file
+  if (arg_test->count == 1){
     bTestingMode = true;
+    log_info = 1;
+    log_debug = 1;
+    log_traffic = 1;
+  }
+  if (arg_test2->count == 1){
+    bTestingMode = true;
+    bTestingMode2 = true;
+    log_info = 1;
+    log_debug = 1;
+    log_traffic = 1;
   }
   arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
 }
@@ -2231,6 +2215,7 @@ void* iptables_check_thread (void *ptr)
   printf ("are known to change iptables rules. Since LF relies heavily on iptables,\n");
   printf ("most likely LF will not work correctly until it is restarted.\n");
   printf ("It is advised that you terminate LF.\n");
+  iptablesChangeDetected = true;
 }
 
 
@@ -2239,7 +2224,8 @@ void init_iptables()
   _system ("iptables -F INPUT");
   _system ("iptables -F OUTPUT");
   string gid_match = ""; //not in use in normal (non-testing) mode
-  if (bTestingMode) { gid_match= "-m owner --gid-owner lpfwtest"; }
+  if (bTestingMode && !bTestingMode2){
+    gid_match= "-m owner --gid-owner lpfwtest"; }
   _system (string("iptables -I OUTPUT 1 -m state --state NEW " +
                   gid_match + " -j NFQUEUE --queue-num 11220").c_str());
   //owner match doesn't work with INPUT hooks
@@ -2263,7 +2249,11 @@ void init_iptables()
   strcat (save_input, SAVE_IPTABLES_INPUT_FILE);
   _system (save_output);
   _system (save_input);
-  _pthread_create ( &iptables_check, (pthread_attr_t *)NULL, iptables_check_thread, (void *)NULL);
+  if (!bTestingMode){
+    //in testing mode new iptables rules are added for incoming traffic
+    //so we disable the check
+    _pthread_create ( &iptables_check, (pthread_attr_t *)NULL, iptables_check_thread, (void *)NULL);
+  }
 }
 
 

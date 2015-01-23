@@ -33,13 +33,26 @@
 #include "common/includes.h"
 #include "common/syscall_wrappers.h"
 
-typedef map<string, string> procmap;
+struct proc{
+  bool firstinstance;
+  string host;
+  string localport;
+  string mode;
+  string path;
+  string perms;
+  string PID;
+  string proto;
+  string randID;
+  string remoteport;
+  string starttime;
+};
 
 using namespace std;
 
 extern vector<string> split_string(string input, string delimiter=" ");
 extern pthread_mutex_t rules_mutex;
 extern vector<rule> rules;
+extern string rules_file;
 extern bool awaiting_reply_from_fe;
 extern int ruleslist_add( const string path, const string pid, const string perms,
                           const bool active, const string sha, const unsigned long long stime,
@@ -47,7 +60,7 @@ extern int ruleslist_add( const string path, const string pid, const string perm
 string test_frontend_request = ""; //global var used to make sure the frontend receives
 //correct request strings
 string test_verdict; //global var to tell frontend which verdict to pass
-map <string, map <string, string> > test_requests; //maps PID to a request
+map <string, proc > test_requests; //maps PID to a request
 //which is about to be sent to the frontend. Used to check request formatting
 string iface_str;
 int local_tcp_echo_port;
@@ -153,7 +166,7 @@ void* frontend_thread(void *data){
 
   int daemon_port = 0;
   string port_str;
-  ifstream portfile("/tmp/commport");
+  ifstream portfile("/tmp/lpfwcommport");
   getline(portfile, port_str);
   portfile.close();
   daemon_port = stoi(port_str);
@@ -199,17 +212,17 @@ void* frontend_thread(void *data){
         cout << "Unexpected pid in request \n";
         exit(1);
       }
-      map <string, string> match = test_requests.at(pid);
+      proc match = test_requests.at(pid);
       test_requests.erase(pid);
 
-      if (match["path"] != path || match["starttime"] != starttime || match["host"] != host ||
-          match["localport"] != localport ){
+      if (match.path != path || match.starttime != starttime || match.host != host ||
+          match.localport != localport ){
           //|| match["remoteport"] != remoteport){ //TODO figure out remoteport for localservers
         cout << "Unexpected REQUEST in frontend \n";
         abort();
         exit(1);
       }
-      string perms = match["perms"];
+      string perms = match.perms;
       string response = "ADD " + path + " " + pid + " " + perms;
       if (send(sockfd, response.c_str(), response.length(), MSG_NOSIGNAL) < 0) {
         cout << "ERROR writing to socket";
@@ -281,7 +294,7 @@ bool wait_for_semaphore_file(string path, bool bShouldReturn = false){
 
 //starts a new process and returns its random ID and PID
 //the process is listening on further commands
-procmap new_process(){
+proc new_process(){
   char *temppath = get_current_dir_name();
   string cwd(temppath);
   free(temppath);
@@ -302,17 +315,17 @@ procmap new_process(){
   getline(pidfile, pid_str);
   pidfile.close();
   assert (pid_str != "");
-  procmap retval;
-  retval["randID"] = random_str;
-  retval["PID"] = pid_str;
-  retval["path"] = cp_dst + random_str;
-  retval["firstinstance"] = "true";
+  proc retval;
+  retval.randID = random_str;
+  retval.PID = pid_str;
+  retval.path = cp_dst + random_str;
+  retval.firstinstance = "true";
   return retval;
 }
 
 
-void issue_command(procmap proc, string command){
-  string randID = proc["randID"];
+void issue_command(proc proc, string command){
+  string randID = proc.randID;
   wait_for_semaphore_file("/tmp/lpfwtest/"+randID+".ready-to-receive-commands");
   ofstream f("/tmp/lpfwtest/"+randID+".command");
   f << command;
@@ -323,9 +336,9 @@ void issue_command(procmap proc, string command){
 }
 
 
-string get_port_number(procmap proc){
-  string randID = proc["randID"];
-  string proto = proc["proto"];
+string get_port_number(proc proc){
+  string randID = proc.randID;
+  string proto = proc.proto;
   string suffix;
   string port;
   wait_for_semaphore_file("/tmp/lpfwtest/"+randID+".port-file-is-ready");
@@ -341,8 +354,8 @@ string get_port_number(procmap proc){
 
 
 //adapted from lpfw.cpp
-string starttimeGet (procmap proc) {
-  string mypid = proc["PID"];
+string starttimeGet (proc proc) {
+  string mypid = proc.PID;
   unsigned long long starttime;
   FILE *stream;
   string path("/proc/" + mypid + "/stat");
@@ -355,10 +368,10 @@ string starttimeGet (procmap proc) {
 
 
 //Return the specified amount of new processes bound to local sockets
-vector<procmap> new_processes(int amount, string mode, string proto){
-  vector<procmap> retprocs;
+vector<proc> new_processes(int amount, string mode, string proto){
+  vector<proc> retprocs;
   for (int i=0; i<amount; ++i){
-      procmap proc = new_process();
+      proc proc = new_process();
       if (mode == "client"){
         issue_command(proc, "client");
         if (proto == "TCP"){
@@ -378,10 +391,10 @@ vector<procmap> new_processes(int amount, string mode, string proto){
       }
       else { cout << "error\n"; exit(1);}
 
-      proc["proto"] = proto;
-      proc["starttime"] = starttimeGet(proc);
-      proc["mode"] = mode;
-      proc["localport"] = get_port_number(proc);
+      proc.proto = proto;
+      proc.starttime = starttimeGet(proc);
+      proc.mode = mode;
+      proc.localport = get_port_number(proc);
       retprocs.push_back(proc);
   }
   return retprocs;
@@ -391,7 +404,7 @@ vector<procmap> new_processes(int amount, string mode, string proto){
 //Tells frontend to expect a certain request. Test frontend also check request formatting
 //Also adds new items to proc
 //The process is supposed to be bound to local port at this point
-void expect_request(procmap &proc, string perms){
+void expect_request(proc &proc, string perms){
   vector< map<string,string> > tcp_web = {
     {{"host", "199.16.156.6"}, {"port", "80"}}, //twitter
     {{"host", "199.16.156.230"}, {"port", "80"}},
@@ -446,38 +459,38 @@ void expect_request(procmap &proc, string perms){
     {{"host", iface_str}, {"port", std::to_string(local_udp_echo_port)}} };
 
 
-  test_requests[proc["PID"]]["perms"]   = perms;
-  test_requests[proc["PID"]]["path"]    = proc["path"];
+  test_requests[proc.PID].perms   = perms;
+  test_requests[proc.PID].path    = proc.path;
   vector< map<string,string> > tcptestsites;
   vector< map<string,string> > udptestsites;
   if (localtest){
-    tcptestsites = tcp_web;
-    udptestsites = udp_web;}
-  else {
     tcptestsites = tcp_local;
     udptestsites = udp_local;}
+  else {
+    tcptestsites = tcp_web;
+    udptestsites = udp_web;}
   int randidx;
-  if (proc["mode"] == "client"){
-    if (proc["proto"] == "TCP"){
+  if (proc.mode == "client"){
+    if (proc.proto == "TCP"){
       randidx = rand() % tcptestsites.size();
-      test_requests[proc["PID"]]["host"]       = tcptestsites[randidx]["host"];
-      test_requests[proc["PID"]]["remoteport"] = tcptestsites[randidx]["port"];
+      test_requests[proc.PID].host       = tcptestsites[randidx]["host"];
+      test_requests[proc.PID].remoteport = tcptestsites[randidx]["port"];
     }
-    else if (proc["proto"] == "UDP"){
+    else if (proc.proto == "UDP"){
       randidx = rand() % udptestsites.size();
-      test_requests[proc["PID"]]["host"]       = udptestsites[randidx]["host"];
-      test_requests[proc["PID"]]["remoteport"] = udptestsites[randidx]["port"];
+      test_requests[proc.PID].host       = udptestsites[randidx]["host"];
+      test_requests[proc.PID].remoteport = udptestsites[randidx]["port"];
     }
   }
-  else if (proc["mode"] == "server"){
-    test_requests[proc["PID"]]["host"]       = iface_str;
-    test_requests[proc["PID"]]["remoteport"] = "0"; //TODO
+  else if (proc.mode == "server"){
+    test_requests[proc.PID].host       = iface_str;
+    test_requests[proc.PID].remoteport = "0"; //TODO
   }
-  test_requests[proc["PID"]]["localport"] = proc["localport"];
-  test_requests[proc["PID"]]["starttime"] = proc["starttime"];
-  proc["perms"] = perms;
-  proc["host"] = test_requests[proc["PID"]]["host"];
-  proc["remoteport"] = test_requests[proc["PID"]]["remoteport"];
+  test_requests[proc.PID].localport = proc.localport;
+  test_requests[proc.PID].starttime = proc.starttime;
+  proc.perms = perms;
+  proc.host = test_requests[proc.PID].host;
+  proc.remoteport = test_requests[proc.PID].remoteport;
 }
 
 
@@ -488,7 +501,7 @@ string random_verdict(){
 
 
 //Make sure all requests reach the frontend correctly formatted
-void test1(vector<procmap> procs){
+void test1(vector<proc> procs){
   int i;
   for (i=0; i < procs.size(); ++i){
     int rv = remove(string("/tmp/lpfwtest/awaiting_reply.false").c_str());
@@ -496,22 +509,22 @@ void test1(vector<procmap> procs){
       fprintf(stderr, "remove errno is  %d - %s\n", errno, strerror(errno));
       exit(1);
     }
-    if (procs[i]["mode"] == "client"){
-      if (procs[i]["proto"] == "TCP"){
-        issue_command(procs[i], "quicktcp " + procs[i]["host"] + " " + procs[i]["remoteport"]);}
-      else if (procs[i]["proto"] == "UDP"){
-        issue_command(procs[i], "quickudp " + procs[i]["host"] + " " + procs[i]["remoteport"]);}
+    if (procs[i].mode == "client"){
+      if (procs[i].proto == "TCP"){
+        issue_command(procs[i], "quicktcp " + procs[i].host + " " + procs[i].remoteport);}
+      else if (procs[i].proto == "UDP"){
+        issue_command(procs[i], "quickudp " + procs[i].host + " " + procs[i].remoteport);}
     }
-    if (procs[i]["mode"] == "server"){
-      if (procs[i]["proto"] == "TCP"){
+    if (procs[i].mode == "server"){
+      if (procs[i].proto == "TCP"){
         issue_command(procs[i], "localtcpquicksend");}
-      if (procs[i]["proto"] == "UDP"){
+      if (procs[i].proto == "UDP"){
         issue_command(procs[i], "localudpquicksend");}
     }
     int ret = wait_for_semaphore_file("/tmp/lpfwtest/awaiting_reply.false", true);
     if (ret == false){
       cout << "Timeout waiting on the semaphore file /tmp/lpfwtest/awaiting_reply.false \n";
-      cout << procs[i]["path"] << "\n";
+      cout << procs[i].path << "\n";
       cout << "current seconds:" << current_seconds();
       abort();
       exit(1);
@@ -531,7 +544,7 @@ void test1(vector<procmap> procs){
 
 
 //Check that all processes were correctly added to rules
-void test2(vector<procmap> procs){
+void test2(vector<proc> procs){
   int i,j;
   _pthread_mutex_lock ( &rules_mutex );
   vector<rule> rulescopy = rules;
@@ -541,13 +554,13 @@ void test2(vector<procmap> procs){
   for (i=0; i < procs.size(); ++i){
     bFound = false;
     for (j=0; j < rulescopy.size(); ++j){
-      if (rulescopy[j].path == procs[i]["path"] &&
-          rulescopy[j].pid == procs[i]["PID"] &&
-          rulescopy[j].perms == procs[i]["perms"] &&
+      if (rulescopy[j].path == procs[i].path &&
+          rulescopy[j].pid == procs[i].PID &&
+          rulescopy[j].perms == procs[i].perms &&
           rulescopy[j].is_active == true &&
-          ((rulescopy[j].first_instance && procs[i]["firstinstance"] == "true") ||
-          (!rulescopy[j].first_instance && procs[i]["firstinstance"] == "false"))&&
-          std::to_string(rulescopy[j].stime) == procs[i]["starttime"]){
+          ((rulescopy[j].first_instance && procs[i].firstinstance) ||
+          (!rulescopy[j].first_instance && !procs[i].firstinstance))&&
+          std::to_string(rulescopy[j].stime) == procs[i].starttime){
         rulescopy.erase(rulescopy.begin()+j);
         bFound = true;
         break;
@@ -563,23 +576,23 @@ void test2(vector<procmap> procs){
 
 
 //Check if processes can connect to the outside
-void test3(vector<procmap> procs){
+void test3(vector<proc> procs){
   int i;
   for (i=0; i < procs.size(); ++i){
-    if (procs[i]["mode"] == "client"){
-      if (procs[i]["proto"] == "TCP"){
-        issue_command(procs[i], "tcp " + procs[i]["host"] + " " + procs[i]["remoteport"]
-          + " " + procs[i]["perms"]);
+    if (procs[i].mode == "client"){
+      if (procs[i].proto == "TCP"){
+        issue_command(procs[i], "tcp " + procs[i].host + " " + procs[i].remoteport
+          + " " + procs[i].perms);
       }
-      else if  (procs[i]["proto"] == "UDP"){
-        issue_command(procs[i], "udp " + procs[i]["host"] + " " + procs[i]["remoteport"]
-          + " " + procs[i]["perms"]);
+      else if  (procs[i].proto == "UDP"){
+        issue_command(procs[i], "udp " + procs[i].host + " " + procs[i].remoteport
+          + " " + procs[i].perms);
       }
     }
-    if (procs[i]["mode"] == "server"){
-      if (procs[i]["proto"] == "TCP"){
+    if (procs[i].mode == "server"){
+      if (procs[i].proto == "TCP"){
         issue_command(procs[i], "localtcpconnect");}
-      if (procs[i]["proto"] == "UDP"){
+      if (procs[i].proto == "UDP"){
         issue_command(procs[i], "localudpconnect");}
     }
     //if we dont sleep here, we can overwhelm the nfqueue which will cause tests to fail
@@ -595,16 +608,16 @@ void test3(vector<procmap> procs){
   }
 
   for (i=0; i < procs.size(); ++i){
-    string randID = procs[i]["randID"];
+    string randID = procs[i].randID;
     bool exists = fileExists("/tmp/lpfwtest/" + randID + ".connected");
-    if ( (exists && procs[i]["perms"] == "ALLOW_ONCE") ||
-         (exists && procs[i]["perms"] == "ALLOW_ALWAYS") ||
-         (!exists && procs[i]["perms"] == "DENY_ALWAYS") ||
-         (!exists && procs[i]["perms"] == "DENY_ONCE") ) {continue;}
+    if ( (exists && procs[i].perms == "ALLOW_ONCE") ||
+         (exists && procs[i].perms == "ALLOW_ALWAYS") ||
+         (!exists && procs[i].perms == "DENY_ALWAYS") ||
+         (!exists && procs[i].perms == "DENY_ONCE") ) {continue;}
     //else
     cout << " TEST 3 FAILED \n";
-    cout << "randID: " << randID <<  " perms: " << procs[i]["perms"]
-         << " host: " << procs[i]["host"] << " port " << procs[i]["localport"] << "\n";
+    cout << "randID: " << randID <<  " perms: " << procs[i].perms
+         << " host: " << procs[i].host << " port " << procs[i].localport << "\n";
     exit(1);
   }
   cout << " TEST 3 PASSED \n";
@@ -614,13 +627,13 @@ void test3(vector<procmap> procs){
 //Terminates all processes and check if rules correctly reflect that
 //type is a type of processes that must be terminated:
 //all, firstinstance, fork
-void test4(vector<procmap> procs, string type = "all"){
+void test4(vector<proc> procs, string type = "all"){
   int i,j;
-  vector<procmap> procs_terminated;
-  vector<procmap> procs_still_running;
+  vector<proc> procs_terminated;
+  vector<proc> procs_still_running;
   for (i=0; i < procs.size(); ++i){
     if (type == "firstinstance"){
-      if (procs[i]["firstinstance"] == "true") {
+      if (procs[i].firstinstance) {
         procs_terminated.push_back(procs[i]);
         continue;
       }
@@ -630,7 +643,7 @@ void test4(vector<procmap> procs, string type = "all"){
       procs_terminated.push_back(procs[i]);
     }
     else if (type == "fork"){
-      if (procs[i]["firstinstance"] != "true") {
+      if (!procs[i].firstinstance) {
         procs_terminated.push_back(procs[i]);
         continue;
       }
@@ -641,27 +654,27 @@ void test4(vector<procmap> procs, string type = "all"){
   for (i=0; i < procs_terminated.size(); ++i){
     issue_command(procs_terminated[i], "terminate");
   }
-  sleep(2); //allow all rules to be deleted/marked inactive
+  sleep(10); //allow all rules to be deleted/marked inactive
   _pthread_mutex_lock ( &rules_mutex );
   vector<rule> rulescopy = rules;
   _pthread_mutex_unlock ( &rules_mutex );
 
-  vector<procmap> procs_expected_in_rules;
+  vector<proc> procs_expected_in_rules;
   //check if correct procs are left in rules after termination
   for (i=0; i < procs.size(); ++i){
     if (type == "all"){
-      if ( !(procs[i]["perms"] == "ALLOW_ALWAYS" || procs[i]["perms"] == "DENY_ALWAYS")) {continue;}
-      if (procs[i]["firstinstance"] == "true"){
+      if ( !(procs[i].perms == "ALLOW_ALWAYS" || procs[i].perms == "DENY_ALWAYS")) {continue;}
+      if (procs[i].firstinstance){
         procs_expected_in_rules.push_back(procs[i]);
       }
     }
     else if (type == "firstinstance"){
-      if (procs[i]["firstinstance"] != "true"){
+      if (!procs[i].firstinstance){
         procs_expected_in_rules.push_back(procs[i]);
       }
     }
     else if (type == "fork"){
-      if (procs[i]["firstinstance"] == "true"){
+      if (procs[i].firstinstance){
         procs_expected_in_rules.push_back(procs[i]);
       }
     }
@@ -672,10 +685,10 @@ void test4(vector<procmap> procs, string type = "all"){
     exit(1);
   }
   for (i=0; i < procs_expected_in_rules.size(); ++i){
-    procmap proc = procs_expected_in_rules[i];
+    proc proc = procs_expected_in_rules[i];
     bool bFound = false;
     for (j=0; j < rulescopy.size(); ++j){
-      if (rulescopy[j].path == proc["path"] ){
+      if (rulescopy[j].path == proc.path){
        bFound = true;
        if (type == "all" && (rulescopy[j].perms == "ALLOW_ONCE" || rulescopy[j].perms == "DENY_ONCE" ||
            rulescopy[j].is_active || rulescopy[j].pid != "0")) {
@@ -696,15 +709,12 @@ void test4(vector<procmap> procs, string type = "all"){
 }
 
 
-
-
 void start_local_echo_servers(){
   pthread_t thr_tcpserver;
   pthread_create(&thr_tcpserver ,(pthread_attr_t*)NULL, tcp_server, (void *)NULL);
   pthread_t thr_udpserver;
   pthread_create(&thr_udpserver ,(pthread_attr_t*)NULL, udp_server, (void *)NULL);
 }
-
 
 
 //Local TCP echo server which accepts connections and immediately closes them
@@ -783,6 +793,8 @@ void *udp_server (void *ptr){
     local_udp_echo_port = ntohs(sin.sin_port);
   }
 
+  cout << "Local UDP echoserver is listening on port " <<  local_udp_echo_port << "\n";
+
   char msg[1] = {1};
   char buf[1000];
   int i = 0;
@@ -803,40 +815,90 @@ void *udp_server (void *ptr){
 
 
 //Makes sure te fork was started an adds a parentproc's fork to proc list
-procmap new_forked_proc(procmap parentproc){
-  string child_randID = parentproc["randID"]+".fork";
+proc new_forked_proc(proc parentproc){
+  string child_randID = parentproc.randID + ".fork";
   wait_for_semaphore_file("/tmp/lpfwtest/"+child_randID+".pid-file-is-ready");
   string pid_str;
   ifstream pidfile("/tmp/lpfwtest/"+child_randID+".pid");
   getline(pidfile, pid_str);
   pidfile.close();
   assert (pid_str != "");
-  procmap childproc;
-  childproc["randID"] = child_randID;
-  childproc["PID"] = pid_str;
-  childproc["path"] = parentproc["path"];
-  childproc["proto"] = parentproc["proto"];
-  childproc["mode"] = parentproc["mode"];
-  childproc["perms"] = parentproc["perms"];
-  childproc["host"] = parentproc["host"];
-  childproc["remoteport"] = parentproc["remoteport"];
+  proc childproc;
+  childproc.randID = child_randID;
+  childproc.PID = pid_str;
+  childproc.path = parentproc.path;
+  childproc.proto = parentproc.proto;
+  childproc.mode = parentproc.mode;
+  childproc.perms = parentproc.perms;
+  childproc.host = parentproc.host;
+  childproc.remoteport = parentproc.remoteport;
   issue_command(childproc, "client");
-  if (childproc["mode"] == "client"){
-    if ( childproc["proto"] == "TCP"){
+  if (childproc.mode == "client"){
+    if ( childproc.proto == "TCP"){
       issue_command(childproc, "bind_tcp_client");}
-    else if ( childproc["proto"] == "UDP"){
+    else if ( childproc.proto == "UDP"){
       issue_command(childproc, "bind_udp_client");}
   }
-  else if (childproc["mode"] == "server"){
-    if (childproc["proto"] == "TCP"){
+  else if (childproc.mode == "server"){
+    if (childproc.proto == "TCP"){
       issue_command(childproc, "localtcpserver");}
-    else if (childproc["proto"] == "UDP"){
+    else if (childproc.proto == "UDP"){
       issue_command(childproc, "localudpserver");}
   }
-  childproc["starttime"] = starttimeGet(childproc);
-  childproc["localport"] = get_port_number(childproc);
-  childproc["firstinstance"] = "false";
+  childproc.starttime = starttimeGet(childproc);
+  childproc.localport = get_port_number(childproc);
+  childproc.firstinstance = false;
   return childproc;
+}
+
+
+//Take a list of processes and return a list of forked processes
+vector<proc> get_forked_procs(vector<proc> procs){
+  vector<proc> forked_procs;
+  int i;
+  for (i=0;i<procs.size();++i){
+    issue_command(procs[i], "fork");
+    proc childproc = new_forked_proc(procs[i]);
+    if (childproc.mode == "client"){
+      if (childproc.proto == "TCP"){
+        issue_command(childproc, "quicktcp " + childproc.host + " " + childproc.remoteport);}
+      else if (childproc.proto == "UDP"){
+        issue_command(childproc, "quickudp " + childproc.host + " " + childproc.remoteport);}
+    }
+    else if (childproc.mode == "server"){
+      if (childproc.proto == "TCP"){
+        issue_command(childproc, "localtcpquicksend");}
+      if (childproc.proto == "UDP"){
+        issue_command(childproc, "localudpquicksend");}
+    }
+    forked_procs.push_back(childproc);
+  }
+  return forked_procs;
+}
+
+
+void test_rulesfile(){
+  //Create a temp rulesfile
+  string string_to_write = rulesfile_header +
+      "full_path= /random/path1\n"+
+      "permission= ALLOW_ALWAYS\n"+
+      "sha256_hexdigest= 0B982202021111\n"+
+      "conntrack_mark= 12331\n\n"+
+      "full_path= /random/path/2\n"+
+      "permission= DENY_ALWAYS\n"+
+      "sha256_hexdigest= 0AA82202021111\n"+
+      "conntrack_mark= 12322\n\n"+
+      "full_path= /random/path3/3\n"+
+      "permission= ALLOW_ALWAYS\n"+
+      "sha256_hexdigest= 0B982299021111\n"+
+      "conntrack_mark= 42331\n\n";
+  string old_rules_file = rules_file;
+  rules_file = "/tmp/lpfwtestrulesfile";
+  ofstream f(rules_file);
+  f << string_to_write;
+  f.close();
+
+
 }
 
 
@@ -859,17 +921,24 @@ void* thread_test ( void *data ) {
   _pthread_create(&thr_frontend ,(pthread_attr_t*)NULL, frontend_thread, (void *)NULL);
 
   wait_for_semaphore_file("/tmp/lpfwtest/frontend-is-ready");
-  int i,j;
+
+  test_rulesfile();
+
+  int i;
   //pay attention to dmesg output - NFQUEUE can't queue up more than 200 packets
   //it will drop the overflow and tests will fail. Dont create too many simultaneous conns.
   //you may want to increase sleep time between connections in test3
   int newprocs = 10;
   start_local_echo_servers();
 
-  vector<procmap> procs =  new_processes(newprocs, "client", "TCP");
-  vector<procmap> procs2 = new_processes(newprocs, "client", "UDP");
-  vector<procmap> procs3 = new_processes(newprocs, "server", "TCP");
-  vector<procmap> procs4 = new_processes(newprocs, "server", "UDP");
+  vector<proc> procs;
+  procs =  new_processes(newprocs, "client", "TCP");
+  vector<proc> procs2;
+  procs2 = new_processes(newprocs, "client", "UDP");
+  vector<proc> procs3;
+  procs3 = new_processes(newprocs, "server", "TCP");
+  vector<proc> procs4;
+  procs4 = new_processes(newprocs, "server", "UDP");
   procs.insert( procs.end(), procs2.begin(), procs2.end() );
   procs.insert( procs.end(), procs3.begin(), procs3.end() );
   procs.insert( procs.end(), procs4.begin(), procs4.end() );
@@ -878,34 +947,18 @@ void* thread_test ( void *data ) {
     expect_request(procs[i], random_verdict());
   }
 
-  //if you use this, you must comment out test1 and test2
-  for (int i=0;i<procs.size();++i){
+  //if you use this, you must comment out test1 and test2 below
+  for (i=0;i<procs.size();++i){
     expect_request(procs[i], random_verdict());
-    unsigned long long stime = stoll(procs[i]["starttime"]);
-    ruleslist_add(procs[i]["path"], procs[i]["PID"], procs[i]["perms"], true, "", stime, 0, true);
+    unsigned long long stime = stoll(procs[i].starttime);
+    ruleslist_add(procs[i].path, procs[i].PID, procs[i].perms, true, "", stime, 0, true);
   }
 
   //fork and connect
-  vector<procmap> forked_procs;
-  for (i=0;i<procs.size();++i){
-    issue_command(procs[i], "fork");
-    procmap childproc = new_forked_proc(procs[i]);
-    if (childproc["mode"] == "client"){
-      if (childproc["proto"] == "TCP"){
-        issue_command(childproc, "quicktcp " + childproc["host"] + " " + childproc["remoteport"]);}
-      else if (childproc["proto"] == "UDP"){
-        issue_command(childproc, "quickudp " + childproc["host"] + " " + childproc["remoteport"]);}
-    }
-    else if (childproc["mode"] == "server"){
-      if (childproc["proto"] == "TCP"){
-        issue_command(childproc, "localtcpquicksend");}
-      if (childproc["proto"] == "UDP"){
-        issue_command(childproc, "localudpquicksend");}
-    }
-    forked_procs.push_back(childproc);
-  }
+  vector<proc> forked_procs = get_forked_procs(procs);
   procs.insert( procs.end(), forked_procs.begin(), forked_procs.end() );
   std::random_shuffle ( procs.begin(), procs.end() );
+
 
   //test1(procs);
   //sleep(2); //allow the last rule to be added
@@ -915,7 +968,7 @@ void* thread_test ( void *data ) {
   test4(procs, "all");
   //test4(procs, "firstinstance");
   //test4(procs, "fork");
-  sleep(50);
+  //sleep(50);
 
   exit(0);
 }

@@ -63,7 +63,7 @@ void* thread_refresh ( void* ptr );
 //process rules.conf
 void global_rule_add( const char *str_direction, char *str_ports);
 void rules_load();
-void rules_write(bool mutex_being_held = false);
+void rules_save(bool mutex_being_held = false);
 void add_to_rulesfile( const char *executable);
 
 //chack if path+pid combo is already in ruleslist
