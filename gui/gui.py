@@ -4,7 +4,6 @@ import resource
 from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex, QRect, pyqtSlot, QVariant, QString
 from PyQt4.QtNetwork import QHostInfo
 from multiprocessing import Pipe, Process, Lock
-from base64 import b64encode, b64decode
 import socket
 import Queue
 import resource_rc
@@ -73,27 +72,27 @@ class queryDialog(QDialog):
     def escapePressed(self):
         "in case when user pressed Escape"
         print "in escapePressed"
-        msgQueue.put('ADD ' + b64encode(bytearray(self.path, encoding='utf-8')) + ' ' + self.pid + ' IGNORED')
+        msgQueue.put('ADD\n' + bytearray(self.path, encoding='utf-8') + ' \n' + self.pid + '\nIGNORED')
 
 
     def closeEvent(self, event):
         "in case when user closed the dialog without pressing allow or deny"
         print "in closeEvent"
-        msgQueue.put('ADD ' + b64encode(bytearray(self.path, encoding='utf-8')) + ' ' + self.pid + ' IGNORED')
+        msgQueue.put('ADD\n' + bytearray(self.path, encoding='utf-8') + '\n' + self.pid + '\nIGNORED')
 
 
     def allowClicked(self):
         print "allow clicked"
         if (self.checkBox.isChecked()): verdict = "ALLOW_ALWAYS"
         else: verdict = "ALLOW_ONCE"     
-        msgQueue.put('ADD ' + b64encode(bytearray(self.path, encoding='utf-8')) + ' ' + self.pid + ' ' + verdict)
+        msgQueue.put('ADD\n' + bytearray(self.path, encoding='utf-8') + '\n' + self.pid + '\n' + verdict)
 
 
     def denyClicked(self):
         print "deny clicked"
         if (self.checkBox.isChecked()): verdict = "DENY_ALWAYS"
         else: verdict = "DENY_ONCE"     
-        msgQueue.put('ADD ' + b64encode(bytearray(self.path, encoding='utf-8')) + ' ' + self.pid + ' ' + verdict)
+        msgQueue.put('ADD\n' + bytearray(self.path, encoding='utf-8') + '\n' + self.pid + '\n' + verdict)
 
 
     def dialogFinished(self):
@@ -222,7 +221,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         if not bFound:
             print 'Could not find the path to delete'
             return
-        msgQueue.put('DELETE ' + b64encode(bytearray(path, encoding='utf-8')))
+        msgQueue.put('DELETE\n' + bytearray(path, encoding='utf-8'))
     
 
     def closeEvent(self, event):
@@ -242,9 +241,9 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         rawstr = unicode(QString.fromUtf8(data_in))
 
         export_list = []            
-        rules = rawstr[len('RULES_LIST'):].split('CRLF')
+        rules = rawstr[len('RULES_LIST\n'):].split(' CRLF ')[:-1]
         for one_rule in rules: 
-            split_rule = one_rule.split()
+            split_rule = one_rule.split('\n')
             if len(split_rule) != 5: continue
             export_list.append(split_rule)
         export_list.append("EOF")
@@ -260,8 +259,8 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             modellock.release()
             return
         for item in ruleslist[0:-1]:#leave out the last EOF from iteration
-            path_u = b64decode(item[0]).decode('utf-8')
-            fullpath = QStandardItem(path_u)
+            path = item[0]
+            fullpath = QStandardItem(path)
             #item[4] contains nfmark
             fullpath.setData(item[4])
             if (item[1] == "0"):
@@ -271,7 +270,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             pid = QStandardItem(pid_string)
             perms = QStandardItem(item[2])
             #only the name of the executable after the last /
-            m_list = string.rsplit(path_u,"/",1)
+            m_list = string.rsplit(path,"/",1)
             m_name = m_list[1]
             name = QStandardItem(m_name)
             in_allow_traf = QStandardItem()
@@ -295,7 +294,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         if (data):
             message = data.split('EOL')[-2] #discard the last empty one and take the one before it
             #take the last message with 5 elements as it is the most recent one
-            items = message.split('CRLF')[:-1] #discard the last empty one
+            items = message.split(' CRLF ')[:-1] #discard the last empty one
         if (items):
             self.prevstats = items
         else:
@@ -304,7 +303,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         modellock.acquire()
         self.sourcemodel.layoutAboutToBeChanged.emit()                    
         for one_item in items:
-            fields = one_item.split()
+            fields = one_item.split(' ')
             for j in range(self.sourcemodel.rowCount()):
                 #4th element of each line has nfmark in its data field
                 if (self.sourcemodel.item(j,3).data().toString() != fields[0]): continue
@@ -352,8 +351,10 @@ def conntrackThread():
     sock.settimeout(1)
     while True:
         data = ''
-        try: data  = sock.recv(8192)
-        except: continue
+        try: 
+            data  = sock.recv(8192)
+        except: 
+            continue
         if not data:
             time.sleep(1) 
             continue
@@ -371,14 +372,12 @@ def communicationThread():
         try: 
             send_data = ''            
             send_data = msgQueue.get_nowait()
-            if send_data == '': 
-                raise Exception ('no data to send')
             print ('Sending:', send_data)
-            sock.send(bytearray(send_data, encoding='utf-8'))
-        except: 
+            sock.send(send_data)
+        except Queue.Empty: 
             pass #no data in msgQueue
-        data = ''
         try: 
+            data = ''
             data  = sock.recv(8192)
         except: 
             continue
@@ -405,9 +404,9 @@ def communicationThread():
         if (rules_list):
             window.refreshmodelsig.emit(rules_list)
         if (request):
-            split_request = request.split()
+            split_request = request.split('\n')
             req_str = split_request[0]
-            path = b64decode(split_request[1])
+            path = split_request[1]
             pid = split_request[2]
             addr = split_request[4]
             dport = split_request[5]

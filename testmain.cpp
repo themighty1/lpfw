@@ -68,6 +68,8 @@ int local_udp_echo_port;
 void *tcp_server (void *ptr);
 void *udp_server (void *ptr);
 bool localtest = false; //whether to send data to local server (for testing offline) or to web servers
+extern string rulesfile_header;
+
 
 extern void die(string message);
 

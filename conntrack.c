@@ -20,7 +20,6 @@
 #include <vector>
 
 #include "conntrack.h"
-#include "lpfw.h"
 #include "common/includes.h"
 #include "common/syscall_wrappers.h"
 

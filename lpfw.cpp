@@ -48,7 +48,6 @@
 #include "common/syscall_wrappers.h"
 #include "conntrack.h"
 #include "sha256/sha256.h"
-#include "base64.h"
 
 using namespace std;
 
@@ -119,7 +118,7 @@ void set_awaiting_reply_from_fe(bool toggle){
 
 
 //split on a delimiter and return chunks
-vector<string> split_string(string input, string delimiter=" "){
+vector<string> split_string(string input, string delimiter="\n"){
   vector<string> output;
   int pos = 0;
   string token;
@@ -606,7 +605,7 @@ void tcp_server_process_messages(int newsockfd) {
       conntrack_send_anyway = true;
     }
     else if (comm == "DELETE"){ // comm path
-      string path = base64_decode(string_parts[1]);
+      string path = string_parts[1];
       log("DEBUG:backend deleting " + path);
       ruleslist_delete_all(path);
     }
@@ -614,9 +613,9 @@ void tcp_server_process_messages(int newsockfd) {
       rules_save();
     }
     else if (comm == "ADD"){ //ADD path pid perms
-      log("DEBUG:ADDing a rule ");
+      log("DEBUG:ADDing a rule " + string_parts[1]);
       if (!awaiting_reply_from_fe) die();
-      string path = base64_decode(string_parts[1]);
+      string path = string_parts[1];
       string pid = string_parts[2];
       string perms = string_parts[3];
       if (sent_path != string_parts[1] || sent_pid != pid){
@@ -1745,25 +1744,21 @@ int send_request (const string path, const string pid, const string starttime,
              const string raddr, const string rport, const string lport, const int direction) {
   set_awaiting_reply_from_fe(true);
   string req;
-  if (direction == DIRECTION_OUT) {req = "REQUEST_OUT ";}
-  else if (direction == DIRECTION_IN) {req = "REQUEST_IN ";}
-  string b64path = base64_encode(
-            reinterpret_cast<const unsigned char*>(path.c_str()), path.length());
-  requestQueue.push(req + b64path + " " + pid + " " + starttime +
-                  " " + raddr + " " + rport + " " + lport + " EOL ");
+  if (direction == DIRECTION_OUT) {req = "REQUEST_OUT";}
+  else if (direction == DIRECTION_IN) {req = "REQUEST_IN";}
+  requestQueue.push(req + '\n' + path + '\n' + pid + '\n' + starttime +
+                    '\n' + raddr + '\n' + rport + '\n' + lport + " EOL ");
   return SENT_TO_FRONTEND;
 }
 
 
 int send_rules() {
   _pthread_mutex_lock ( &rules_mutex );
-  string message = "RULES_LIST ";
+  string message = "RULES_LIST\n";
   for(int k=0; k < rules.size(); k++){
     string is_active = rules[k].is_active ? "TRUE": "FALSE";
-    string b64path = base64_encode(
-          reinterpret_cast<const unsigned char*>(rules[k].path.c_str()), rules[k].path.length());
-    message += b64path + " " + rules[k].pid + " " + rules[k].perms + " "
-        + is_active + " " + to_string(rules[k].ctmark_out) + " CRLF ";
+    message += rules[k].path + '\n' + rules[k].pid + '\n' + rules[k].perms + '\n'
+        + is_active + '\n' + to_string(rules[k].ctmark_out) + " CRLF ";
   }
   message += " EOL ";
   rulesListQueue.push(message);
