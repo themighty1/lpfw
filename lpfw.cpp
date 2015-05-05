@@ -908,7 +908,7 @@ void* thread_tcp_server ( void *data ) {
 void* thread_refresh ( void* ptr ){
   prctl(PR_SET_NAME,"refresh",0,0,0);
   ptr = 0;     //to prevent gcc warnings of unused variable
-  char exe_path[PATHSIZE];
+  char exe_path[PATHSIZE] = {'\0'};
   bool prevIterationHadAnUpdate = false;
   bool thisIterationHadAnUpdate = false;
 
@@ -1296,13 +1296,14 @@ int socket_active_processes_search ( const long mysocket_in, string &m_path_out,
     }
     while ( m_dirent = readdir ( m_dir ) ) {
       path_file = path_dir + m_dirent->d_name; //path2 contains /proc/PID/fd/1,2,3 etc. which are symlinks
-      char socketbuf[32];
+      char socketbuf[32] = {'\0'};
       int size = readlink (path_file.c_str(), socketbuf, SOCKETBUFSIZE ); //no trailing 0
+      if (size == -1) continue;
       socketbuf[size] = 0; //set trailing 0
       if (find_socket != socketbuf) continue;
       //else match found
       string procexepath = "/proc/" + rulescopy[i].pid + "/exe";
-      char exepathbuf[PATHSIZE];
+      char exepathbuf[PATHSIZE] = {'\0'};
       size = readlink (procexepath.c_str(), exepathbuf, PATHSIZE ); //no trailing 0
       if (size == -1){
         fprintf(stderr, "Error in readlink %d - %s\n", errno, strerror(errno));
@@ -1339,8 +1340,8 @@ int socket_procpidfd_search ( const long mysocket_in, string &m_path_out,
   DIR *proc_DIR, *fd_DIR;
   string fdpath;   // holds path to /proc/<pid>/fd/<number_of_inode_opened>
   // buffers to hold readlink()ed values of /proc/<pid>/exe and /proc/<pid>/fd/<inode>
-  char exepathbuf[PATHSIZE];
-  char socketbuf[SOCKETBUFSIZE];
+  char exepathbuf[PATHSIZE] = {'\0'};
+  char socketbuf[SOCKETBUFSIZE] = {'\0'};
   string find_socket = "socket:[" + to_string(mysocket_in) + "]";
 
   if ((proc_DIR = opendir("/proc")) == NULL) return SOCKET_NOT_FOUND_IN_PROCPIDFD;
@@ -1364,6 +1365,7 @@ int socket_procpidfd_search ( const long mysocket_in, string &m_path_out,
       if ( fd_dirent->d_name[0] == 46 ) continue;
       fdpath = path + "/" + fd_dirent->d_name;
       int size= readlink (fdpath.c_str(), socketbuf, SOCKETBUFSIZE ); //no trailing 0
+      if (size == -1) continue;
       socketbuf[size] = 0;
       if (find_socket != socketbuf) continue;
       //else we found our socket!!!!
