@@ -2,8 +2,9 @@
 	control over which applications are allowed to use the network. 
 	It comes with a GUI.
 
-These instructions apply specifically to Ubuntu 14.04 but are very 
+These instructions apply specifically to Ubuntu 14.04 64-bit but are very
 likely to work on other Linux distributions.
+Please note that on 32-bit Linuxes lpfw may function incorrectly.
 
 Install all dependencies:
 sudo apt-get install make g++ libnetfilter-queue-dev libnetfilter-conntrack-dev libcap-dev python-qt4
@@ -43,9 +44,8 @@ COMMANDLINE ARGUMENTS:
 
 
 KNOWN ISSUES:
-    Only IPv4 is supported, IPv6 support is underway.
-    Only one program can send ICMP packets simultaneously, if more than one does, LPFW blocks both.
-    Only TCP, UDP, ICMP (partly, see above) protocols are supported. If your system happens to use any other transport protocol besides TCP/UDP/ICMP and you don't want those packets discarded by lpfw, consider adding a rule to iptables something like: >>> iptables -I OUTPUT 1 -p udplite -j ACCEPT <<< This rule should preceed NFQUEUE rule.
+    Only IPv4.
+    Only TCP and UDP. If your system happens to use any other transport protocol besides TCP/UDP/ICMP and you don't want those packets discarded by lpfw, consider adding a rule to iptables something like: >>> iptables -I OUTPUT 1 -p udplite -j ACCEPT <<< This rule should preceed NFQUEUE rule.
     If LPFW crashes, the user will have to run "sudo iptables -F" to be able to access the internet without restarting computer.
 
 
