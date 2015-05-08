@@ -45,8 +45,9 @@ COMMANDLINE ARGUMENTS:
 
 KNOWN ISSUES:
     Only IPv4.
-    Only TCP and UDP. If your system happens to use any other transport protocol besides TCP/UDP/ICMP and you don't want those packets discarded by lpfw, consider adding a rule to iptables something like: >>> iptables -I OUTPUT 1 -p udplite -j ACCEPT <<< This rule should preceed NFQUEUE rule.
-    If LPFW crashes, the user will have to run "sudo iptables -F" to be able to access the internet without restarting computer.
+    Only TCP and UDP. LPFW will drop any other protocol packets. To prevent dropping, add a rule which must preceed the LPFW's NFQUEUE rules, e.g.
+    iptables -I OUTPUT 1 -p udplite -j ACCEPT
+    If LPFW crashes, run "sudo iptables -F" to disable all rules.
 
 
 
