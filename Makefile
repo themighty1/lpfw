@@ -35,4 +35,7 @@ testmain.o : testmain.cpp
 
 testprocess: testprocess.cpp
 	g++ -g -std=c++11 testprocess.cpp -lpthread -o testprocess
-	
+
+
+clean :
+	rm -f testprocess *.o  lpfw
