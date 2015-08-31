@@ -103,7 +103,7 @@ extern struct nfct_handle *setmark_handle;
 bool conntrack_send_anyway = false; //used to tell ct thread to send stats even if there
 //was no recent update. Useful when frontend started mid-way and needs ct stats
 
-//fwd delarations
+//fwd declarations
 int send_rules();
 void log(string);
 
@@ -2351,7 +2351,7 @@ int main ( int argc, char *argv[] )
   of_limit.rlim_cur = 500000;
   of_limit.rlim_max = 500000;
   if(setrlimit(RLIMIT_CORE, &core_limit) < 0){
-  printf("setrlimit: %s\nWarning: core dumps may be truncated or non-existant\n", strerror(errno));}
+  printf("setrlimit: %s\nWarning: core dumps may be truncated or non-existent\n", strerror(errno));}
   if(setrlimit(RLIMIT_NOFILE, &of_limit) < 0){
   printf("setrlimit: %s\nWarning: could not increase open file limit\n", strerror(errno));}
 
