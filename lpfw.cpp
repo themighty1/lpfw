@@ -96,7 +96,6 @@ pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 int tcp_stats, udp_stats;
 bool awaiting_reply_from_fe = false; //true when expecting a reply from frontend
 bool bTestingMode = false;
-bool bTestingMode2 = false;
 bool iptablesChangeDetected = false;
 int ctmark_to_set;
 extern struct nfct_handle *setmark_handle;
@@ -2033,9 +2032,7 @@ int parse_command_line(int argc, char* argv[]){
   struct arg_int *arg_log_debug = arg_int0(NULL,
     "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
   struct arg_lit *arg_test = arg_lit0(NULL,
-    "test", "Run unit test" );
-  struct arg_lit *arg_test2 = arg_lit0(NULL,
-    "test2", "Run unit test. Will take over the machine's connection" );
+    "test", "Run tests. This will NOT affect the machine's connection" );
   struct arg_lit *arg_help = arg_lit0(NULL,
     "help", "Display help screen" );
   struct arg_lit *arg_version = arg_lit0(NULL,
@@ -2043,7 +2040,7 @@ int parse_command_line(int argc, char* argv[]){
   struct arg_end *end = arg_end ( 30 );
   void *argtable[] = {arg_logging_facility, arg_rules_file, arg_pid_file, arg_log_file,
                       arg_log_info, arg_log_traffic, arg_log_debug,
-                      arg_help, arg_version, arg_test, arg_test2, end};
+                      arg_help, arg_version, arg_test, end};
 
   if ( arg_nullcheck ( argtable ) != 0 ){
     printf ( "Error parsing command line: insufficient memory\n" );
@@ -2089,13 +2086,6 @@ int parse_command_line(int argc, char* argv[]){
   }
   if (arg_test->count == 1){
     bTestingMode = true;
-    log_info = 1;
-    log_debug = 1;
-    log_traffic = 1;
-  }
-  if (arg_test2->count == 1){
-    bTestingMode = true;
-    bTestingMode2 = true;
     log_info = 1;
     log_debug = 1;
     log_traffic = 1;
@@ -2222,7 +2212,7 @@ void init_iptables()
   _system ("iptables -F INPUT");
   _system ("iptables -F OUTPUT");
   string gid_match = ""; //not in use in normal (non-testing) mode
-  if (bTestingMode && !bTestingMode2){
+  if (bTestingMode){
     gid_match= "-m owner --gid-owner lpfwtest"; }
   _system (string("iptables -I OUTPUT 1 -m state --state NEW " +
                   gid_match + " -j NFQUEUE --queue-num 11220").c_str());

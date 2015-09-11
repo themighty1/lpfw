@@ -162,6 +162,7 @@ void start_process(string commline){
 }
 
 
+//Doew what the GUI frontend does - responds with the verdict
 void* frontend_thread(void *data){
   int sockfd, n;
   char buffer[8192*64];
@@ -930,7 +931,7 @@ void* thread_test ( void *data ) {
   //pay attention to dmesg output - NFQUEUE can't queue up more than 200 packets
   //it will drop the overflow and tests will fail. Dont create too many simultaneous conns.
   //you may want to increase sleep time between connections in test3
-  int newprocs = 10;
+  int newprocs = 5;
   start_local_echo_servers();
 
   vector<proc> procs;
