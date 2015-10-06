@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import sys, os, thread, time, string, threading, subprocess
 from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator, QStyledItemDelegate, QPainter, QStyleOptionViewItem, QFont, QTableWidgetItem, QPalette, QColor, QSortFilterProxyModel
 import resource
