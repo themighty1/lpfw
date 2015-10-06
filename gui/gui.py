@@ -1,7 +1,7 @@
-import sys, os, thread, time, string, threading, subprocess
+import sys, os, thread, time, string, threading, subprocess, signal
 from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator, QStyledItemDelegate, QPainter, QStyleOptionViewItem, QFont, QTableWidgetItem, QPalette, QColor, QSortFilterProxyModel
 import resource
-from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex, QRect, pyqtSlot, QVariant, QString
+from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex, QRect, pyqtSlot, QVariant, QString, QTimer
 from PyQt4.QtNetwork import QHostInfo
 from multiprocessing import Pipe, Process, Lock
 from base64 import b64encode, b64decode
@@ -493,9 +493,33 @@ if __name__ == "__main__":
     elif (sys.argv[1] != "debug"):
         import wingdbstub
 
+    # handle pid file
+    fname = os.path.expanduser("~/.lpfw.pid")
+    if os.path.isfile(fname):
+        f = open(fname,'r')
+        pid = int(f.readline())
+        f.close()
+        # check if process still exists
+        if os.path.exists("/proc/%s" % pid):
+            os.kill(pid, signal.SIGUSR1)
+            exit(0)
+        else:
+            f = open(fname,'w')
+            f.write("%s" % os.getpid())
+            f.close()
+    else:
+        f = open(fname,'w')
+        f.write("%s" % os.getpid())
+        f.close()
+
     app=QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     window = myMainWindow()
+
+    # run interpreter from time to time (to catch signals)
+    timer = QTimer()
+    timer.start(1000)
+    timer.timeout.connect(lambda: None)
 
     tray = QSystemTrayIcon(QIcon(":/pics/pic24.png"))
     menu = QMenu()
@@ -535,4 +559,12 @@ if __name__ == "__main__":
     thread.start()
 
     window.show()
+
+    # handler for system signal
+    def reopen_window(signum, stack):
+        window.show()
+
+    # attach SIGUSR1 to handler
+    signal.signal(signal.SIGUSR1, reopen_window)
+
     sys.exit(app.exec_())
