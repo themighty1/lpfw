@@ -98,12 +98,12 @@ int write_port_file(int sockfd, string protocol){
     sin.sin_family == AF_INET && addrlen == sizeof(sin)) {
     int local_port = ntohs(sin.sin_port);
     string suffix = ".none";
-    if (protocol == "TCP"){suffix = ".tcp";}
-    else if (protocol == "UDP"){suffix = ".udp";}
+    if (protocol == "TCP"){suffix = ".tcpport";}
+    else if (protocol == "UDP"){suffix = ".udpport";}
     ofstream socket_file("/tmp/lpfwtest/" + random_str + suffix);
     socket_file << to_string(local_port);
     socket_file.close();
-    ofstream portready("/tmp/lpfwtest/"+random_str+".port-file-is-ready");
+    ofstream portready("/tmp/lpfwtest/" + random_str + suffix + ".ready");
     portready.close();
     return local_port;
   }

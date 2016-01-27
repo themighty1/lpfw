@@ -720,8 +720,29 @@ void start_local_echo_servers(){
 }
 
 
-//Local TCP echo server which accepts connections and immediately closes them
+//Local TCP echo server which accepts connections and
+//checks if it received correct data
 void *tcp_server (void *ptr){
+  string command((char*) ptr);
+  free(ptr);
+  cout << "tcp_server got command: " << command << "\n";
+  //parse the command
+  string expected_data = "";
+  string id = "";
+  int port;
+  vector<string>parts = split_string(command, " ");
+  for (int i=0; i<parts.size(); i++){
+    //separate the key from the value
+    vector<string>keyvalue = split_string(parts[i], ":");
+    if (keyvalue[0] == "expected_data"){
+      expected_data = keyvalue[1];
+    }
+    else if (keyvalue[0] == "id"){
+      id = keyvalue[1];
+    }
+  }
+  cout << "expecting data: " << expected_data << "\n";
+
   int list_s;                /*  listening socket          */
   struct sockaddr_in servaddr;  /*  socket address structure  */
 
@@ -746,6 +767,7 @@ void *tcp_server (void *ptr){
   if(getsockname(list_s, (struct sockaddr *)&sin, &addrlen) == 0 &&
     sin.sin_family == AF_INET && addrlen == sizeof(sin)) {
     local_tcp_echo_port = ntohs(sin.sin_port);
+    port = ntohs(sin.sin_port);
   }
 
   if ( listen(list_s, 500) < 0 ) {
@@ -753,16 +775,26 @@ void *tcp_server (void *ptr){
     exit(EXIT_FAILURE);
   }
   cout << "Local TCP echoserver is listening on port " <<  local_tcp_echo_port << "\n";
+  if (id.size()){
+    ofstream f("/tmp/lpfwtest/tcpserver."+id+".port");
+    f << to_string(port);
+    f.close();
+    ofstream ff("/tmp/lpfwtest/tcpserver."+id+".port.ready");
+    ff.close();
+  }
 
   int connfd;
   int i = 0;
+  char recv_data[1024];
   while (true){
     connfd = accept(list_s, NULL, NULL);
-    i++;
-    //cout << "****************TCP ECHO SERVER got conn no " << i << "\n";
     if ( connfd < 0 ) {
           fprintf(stderr, "ECHOSERV: Error calling accept()\n");
           exit(EXIT_FAILURE);
+    }
+    if (expected_data.size()){
+      recv(connfd,recv_data,1024,0);
+      cout << "received " << recv_data << "\n";
     }
     close(connfd);
   }
@@ -900,8 +932,50 @@ void test_rulesfile(){
   ofstream f(rules_file);
   f << string_to_write;
   f.close();
+}
 
 
+void start_local_tcp_server(string command){
+  pthread_t thread;
+  char* arg = (char*)malloc(command.length()+1);
+  strncpy(arg, command.c_str(), command.length()+1);
+  _pthread_create(&thread ,(pthread_attr_t*)NULL, tcp_server, (void *)arg);
+}
+
+
+//Make a connection and send some data
+//then check on the server side if source port was correct and data was correct
+void test_tcp_client(){
+
+  //Launch a client and bind it to tcp port and prepare a random payload
+  proc process = new_process();
+  issue_command(process, "bind_tcp_client");
+  string client_port = wait_and_read(process.randID + ".tcpport")
+  string payload = to_string(rand());
+
+  //Launch server
+  string id = to_string(rand());
+  start_local_tcp_server("expected_data:"+payload+" sourceport:"+client_port+" id:"+id);
+  //wait for server to signal what port it is using
+  string server_port = wait_and_read("tcpserver."+id+".tcpport");
+  cout << "tcp client will connect to port " << server_port << "\n";
+
+  //Modify testprocess so it accepts the IP:port it must connect to
+  //TODO need a function wait_and_read(tcpserver."+process.randID+".port)
+  issue_command(process, );
+
+  //TODO launch server from a testprocess app rather than a thread from this file
+}
+
+
+string wait_and_read(dir){
+  string full_path = "/tmp/lpfwtest/"+dir;
+  wait_for_semaphore_file(full_path+".ready");
+  string data_str;
+  ifstream f(full_path);
+  getline(f, data_str);
+  f.close();
+  return data_str;
 }
 
 
@@ -926,6 +1000,8 @@ void* thread_test ( void *data ) {
   wait_for_semaphore_file("/tmp/lpfwtest/frontend-is-ready");
 
   test_rulesfile();
+  test_tcp_client();
+  return 0;
 
   int i;
   //pay attention to dmesg output - NFQUEUE can't queue up more than 200 packets

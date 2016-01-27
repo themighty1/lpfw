@@ -533,5 +533,5 @@ if __name__ == "__main__":
     thread.daemon = True
     thread.start()
 
-    window.show()
+    #window.show()
     sys.exit(app.exec_())
