@@ -2325,12 +2325,13 @@ void pidfile_check(){
 
 void SIGTERM_handler ( int signal )
 {
+  cout << "Removing pidfile and flushing netfilter. Bye." << "\n";
   _remove ( pid_file->filename[0] );
   //release netfilter_queue resources
   _nfq_close ( globalh_out );
-  printf ("In sigterm handler");
   //remove iptables  rules
   _system ("iptables -F");
+  exit(0);
 }
 
 /*command line parsing contributed by Ramon Fried*/
@@ -2593,10 +2594,14 @@ void setup_signal_handlers()
 {
     //install SIGTERM handler
     struct sigaction sa;
+    memset(&sa, 0, sizeof(struct sigaction));
     sa.sa_handler = SIGTERM_handler;
-    sigemptyset ( &sa.sa_mask );
-    //if ( sigaction ( SIGTERM, &sa, NULL ) == -1 ){perror ( "sigaction" );}
-
+    if ( sigaction ( SIGTERM, &sa, NULL ) == -1 ){
+      perror ( "sigaction" );
+    }
+    if ( sigaction ( SIGINT, &sa, NULL ) == -1 ){
+      perror ( "sigaction" );
+    }
 }
 
 
