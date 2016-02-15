@@ -303,8 +303,10 @@ int build_port_and_socket_cache(unsigned long &socket_out, const string localadd
           continue;}
         }
         if (proto == "UDP" || proto == "UDP6"){
-          if( (direction == DIRECTION_OUT && !(state[0] == '0' && state[1] == '7')) ||
+          if( (direction == DIRECTION_OUT && !(state[0] == '0' && (state[1] == '7' || state[1] == '1'))) ||
               (direction == DIRECTION_IN && !(state[0] == '0' && state[1] == '7')) ){
+          //Note: I couldnt find any docu on UDP state 01, but observing /proc/net/udp
+          //this seems like a legit state of the sending socket
           //state 07: listening for UDP
           continue;}
         }
