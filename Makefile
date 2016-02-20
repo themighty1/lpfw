@@ -2,11 +2,13 @@ g++FLAGS = -g -fpermissive -std=c++11 -Wfatal-errors
 
 all: lpfw testprocess
 
-lpfw: sha256.o conntrack.o testmain.o \
+lpfw: sha256.o conntrack.o \
       argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
-      lpfw.cpp lpfw.h common/defines.h common/includes.h
+      lpfw.cpp lpfw.h common/defines.h common/includes.h \
+      rulesfile.o
 	g++ $(g++FLAGS) sha256.o conntrack.o testmain.o \
 	    argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
+      rulesfile.o \
 	    lpfw.cpp -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
 sha256.o : sha256/sha256.c sha256/sha256.h sha256/u64.h
@@ -29,6 +31,8 @@ arg_str.o : argtable/arg_str.c
 	g++ $(g++FLAGS) -c argtable/arg_str.c
 testmain.o : testmain.cpp
 	g++ $(g++FLAGS) -c testmain.cpp
+rulesfile.o : rulesfile.cpp rulesfile.h
+	g++ $(g++FLAGS) -c rulesfile.cpp
 
 
 testprocess: testprocess.cpp

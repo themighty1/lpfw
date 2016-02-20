@@ -48,6 +48,7 @@
 #include "common/syscall_wrappers.h"
 #include "conntrack.h"
 #include "sha256/sha256.h"
+#include "rulesfile.h"
 
 using namespace std;
 
@@ -105,6 +106,8 @@ bool conntrack_send_anyway = false; //used to tell ct thread to send stats even 
 //fwd delarations
 int send_rules();
 void log(string);
+
+RulesFile rulesfile;
 
 
 void set_awaiting_reply_from_fe(bool toggle){
@@ -410,7 +413,10 @@ int ruleslist_add( const string path, const string pid, const string perms,
   rules.push_back(newrule);
   _pthread_mutex_unlock ( &rules_mutex );
   if (perms == ALLOW_ALWAYS || perms == DENY_ALWAYS) {
-    rules_save();
+    _pthread_mutex_lock ( &rules_mutex );
+    vector<rule> rulescopy = rules;
+    _pthread_mutex_unlock ( &rules_mutex );
+    rulesfile.save(rulescopy);
   }
   return retctmark;
 }
@@ -445,7 +451,11 @@ void ruleslist_delete_all ( const string path) {
   _pthread_mutex_unlock ( &rules_mutex );
   if (! bRulesChanged) die(); //couldnt find the rule
   if (bNeedToWriteRulesfile){
-    rules_save();}
+    _pthread_mutex_lock ( &rules_mutex );
+    vector<rule> rulescopy = rules;
+    _pthread_mutex_unlock ( &rules_mutex );
+    rulesfile.save(rulescopy);
+  }
   if (bFrontendActive) {
     send_rules();}
 }
@@ -609,7 +619,10 @@ void tcp_server_process_messages(int newsockfd) {
       ruleslist_delete_all(path);
     }
     else if (comm == "WRITE"){ //Not in use
-      rules_save();
+      _pthread_mutex_lock ( &rules_mutex );
+      vector<rule> rulescopy = rules;
+      _pthread_mutex_unlock ( &rules_mutex );
+      rulesfile.save(rulescopy);
     }
     else if (comm == "ADD"){ //ADD path pid perms
       log("DEBUG:ADDing a rule " + string_parts[1]);
@@ -742,7 +755,8 @@ void* thread_refresh ( void* ptr ){
            if (rules[j].perms != rules[i].perms) continue;
            bFoundAnotherOne = true;
            ruleslist_delete_one ( rules[i].path, rules[i].pid );
-           rules_save(true);
+           vector<rule> rulescopy = rules;
+           rulesfile.save(rulescopy);
            thisIterationHadAnUpdate = true;
            break;
          }
@@ -777,6 +791,7 @@ void* thread_refresh ( void* ptr ){
 }
 
 
+//TODO: to be removed, implemented in RulesFile::load
 //Load rules from rulesfile at startup
 void rules_load(){
   ifstream inputFile(rules_file);
@@ -870,6 +885,9 @@ void rules_load(){
 //iterate over rulescopy removing all rules which are not *ALWAYS
 //or which are duplicates of other *ALWAYS rules with the same path
 //this will leave us with rulescopy with unique *ALWAYS rules
+
+
+//TODO this func migrated to rulesfile.cpp
 void rules_save(bool mutex_being_held){
   if (!mutex_being_held) _pthread_mutex_lock ( &rules_mutex );
   vector<rule> rulescopy = rules;
@@ -892,19 +910,7 @@ void rules_save(bool mutex_being_held){
     }
   }
   //write rules
-  string string_to_write = rulesfile_header;
-  for(i = 0; i < rulescopy.size(); i++){
-    string_to_write += "full_path=        " + rulescopy[i].path + "\n";
-    string_to_write += "permission=       " + rulescopy[i].perms + "\n";
-    string_to_write += "sha256_hexdigest= " + rulescopy[i].sha + "\n";
-    if (rulescopy[i].is_fixed_ctmark){
-      string_to_write += "conntrack_mark=   " + to_string(rulescopy[i].ctmark_out) + "\n";
-    }
-    string_to_write += "\n";
-  }
-  ofstream myfile(rules_file);
-  myfile << string_to_write;
-  myfile.close();
+  rulesfile.save(rulescopy);
 }
 
 
@@ -2351,7 +2357,12 @@ int main ( int argc, char *argv[] )
 
   pidfile_check();
   if (!bTestingMode) {
-    rules_load();
+    rulesfile = RulesFile(rules_file);
+    vector<rule> rulesFromFile = rulesfile.read();
+    for (int i=0; i<rulesFromFile.size(); i++){
+      rules.push_back(rulesFromFile[i]);
+    }
+    //rules_load();
   }
   open_proc_net_files();
 
