@@ -1,6 +1,6 @@
 g++FLAGS = -g -fpermissive -std=c++11 -Wfatal-errors
 
-all: lpfw testprocess
+all: lpfw testprocess tests
 
 lpfw: sha256.o conntrack.o \
       argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
@@ -38,3 +38,7 @@ rulesfile.o : rulesfile.cpp rulesfile.h
 testprocess: testprocess.cpp
 	g++ -g -std=c++11 testprocess.cpp -lpthread -o testprocess
 	
+tests:	rulesfile.cpp rulesfile.h rulesfile_test.cpp all_tests.cpp
+	g++ -g -std=c++11 -I/home/default2/Desktop/githubrepos/lpfw/gtest/include \
+	gtest/gtest-all.o gtest/libgtest.a rulesfile.cpp rulesfile_test.cpp all_tests.cpp -lpthread -o alltests
+
