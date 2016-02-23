@@ -1,14 +1,17 @@
 g++FLAGS = -g -fpermissive -std=c++11 -Wfatal-errors
+gtestInclude = -I/home/default2/Desktop/githubrepos/lpfw/gtest/include
+gtestFLAGS = $(g++FLAGS) $(gtestInclude)
+gtestLinkFLAGS = gtest/gtest-all.o gtest/libgtest.a $(gtestInclude)
 
 all: lpfw testprocess tests
 
 clean:
 	rm -rf *.o testprocess lpfw
 
-lpfw: sha256.o conntrack.o testmain.o \
+lpfw: sha256.o conntrack.o \
       argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
       lpfw.cpp lpfw.h common/defines.h common/includes.h \
-      rulesfile.o
+      rulesfile.o ruleslist.o
 	g++ $(g++FLAGS) sha256.o conntrack.o testmain.o \
 	    argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
       rulesfile.o \
@@ -32,17 +35,23 @@ arg_rem.o : argtable/arg_rem.c
 	g++ $(g++FLAGS) -c argtable/arg_rem.c
 arg_str.o : argtable/arg_str.c
 	g++ $(g++FLAGS) -c argtable/arg_str.c
-testmain.o : testmain.cpp
-	g++ $(g++FLAGS) -c testmain.cpp
 rulesfile.o : rulesfile.cpp rulesfile.h
 	g++ $(g++FLAGS) -c rulesfile.cpp
+rulesfile_test.o : rulesfile.o rulesfile_test.cpp
+	g++ $(gtestFLAGS) -c rulesfile_test.cpp
+ruleslist.o : ruleslist.cpp ruleslist.h sha256.o
+	g++ $(g++FLAGS) -c ruleslist.cpp
+ruleslist_test.o : ruleslist.o ruleslist_test.cpp
+	g++ $(gtestFLAGS) -c ruleslist_test.cpp
+
 
 
 
 testprocess: testprocess.cpp
 	g++ -g -std=c++11 testprocess.cpp -lpthread -o testprocess
 	
-tests:	rulesfile.cpp rulesfile.h rulesfile_test.cpp all_tests.cpp
-	g++ -g -std=c++11 -I/home/default2/Desktop/githubrepos/lpfw/gtest/include \
-	gtest/gtest-all.o gtest/libgtest.a rulesfile.cpp rulesfile_test.cpp all_tests.cpp -lpthread -o alltests
+tests:	all_tests.cpp rulesfile_test.o ruleslist_test.o
+	g++ $(g++FLAGS) $(gtestLinkFLAGS) \
+	rulesfile.o rulesfile_test.o ruleslist.o sha256.o ruleslist_test.o \
+	all_tests.cpp -lpthread -o alltests
 

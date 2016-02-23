@@ -17,21 +17,22 @@ void die_syscall(string message);
 
 
 struct rule{
-  string path; //path to executable
-  string pid; //its pid (or IP address for kernel processes)
-  string perms; // permission in the form "ALLOW ALWAYS"
-  string sha; //sha256 hexdigest
-  u_int32_t ctmark_out;
-  u_int32_t ctmark_in; //conntrack mark assigned to each new connection
+  string path = ""; //path to executable
+  string pid = "0"; //its pid (or IP address for kernel processes)
+  string perms = "DENY ALWAYS"; // permission in the form "ALLOW ALWAYS"
+  string sha = ""; //sha256 hexdigest
+  u_int32_t ctmark_out = 0;
+  u_int32_t ctmark_in = 0; //conntrack mark assigned to each new connection
   //and used when a user deletes a rule to tell conntrack to immediately
   //drop any existing connections associated with the mark
-  bool is_active; //Has process already been seen sending/receiving packets?
-  bool first_instance; //TRUE for a first instance of an app or a parent process (not in use?)
+  bool is_active = false; //Has process already been seen sending/receiving packets?
+  bool first_instance = true; //TRUE for a first instance of an app or a parent process (not in use?)
   bool is_fixed_ctmark = false; //the user may assign a fixed netfilter mark for conntrack purposes
-  unsigned long long stime; // start time of the process
+  unsigned long long stime = 0; // start time of the process
   vector<long> sockets;//sockets owned by the processes
-  string pidfdpath; //path to /proc/PID/fd
-  DIR *dirstream; //a constantly open stream to /proc/PID/fd
+  string pidfdpath = ""; //path to /proc/PID/fd
+  DIR *dirstream = NULL; //a constantly open stream to /proc/PID/
+  string uid = ""; //unique ID for this rule
 };
 
 

@@ -1,4 +1,5 @@
 #include <cstdarg>
+#include <cstring>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
