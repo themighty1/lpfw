@@ -7,11 +7,11 @@ RulesFile::RulesFile(){}
 //the actual constructor
 RulesFile::RulesFile(string path)
 {
-  this->rulesFilePath = path;
+  rulesFilePath = path;
 }
 
 vector<rule> RulesFile::read(){
-  ifstream inputFile(this->rulesFilePath);
+  ifstream inputFile(rulesFilePath);
   string line;
   int pos;
   bool is_full_path_found = false;
@@ -34,12 +34,9 @@ vector<rule> RulesFile::read(){
         newrule.path = full_path;
         newrule.perms = permission;
         newrule.sha = sha256_hexdigest;
-        newrule.pid = "0";
-        newrule.is_active = false;
-        newrule.stime = 0;
-        newrule.first_instance = true;
         newrule.ctmark_out = 0;
         newrule.ctmark_in = 0;
+        newrule.is_permanent = true;
         if (is_conntrack_mark_found){
           newrule.ctmark_out = conntrack_mark;
           newrule.ctmark_in = conntrack_mark+CTMARK_DELTA;
@@ -116,11 +113,12 @@ vector<rule> RulesFile::read(){
 }
 
 
-bool RulesFile::save(vector<rule> unsanitizedRules){
-  vector<rule>rulesToSave = sanitizeBeforeSave(unsanitizedRules);
+bool RulesFile::save(vector<rule> rulesToSave){
+  //vector<rule>rulesToSave = sanitizeBeforeSave(unsanitizedRules);
 
-  string string_to_write = this->rulesfile_header;
+  string string_to_write = rulesfile_header;
   for(int i = 0; i < rulesToSave.size(); i++){
+    if (!rulesToSave[i].is_permanent) continue;
     string_to_write += "full_path=        " + rulesToSave[i].path + "\n";
     string_to_write += "permission=       " + rulesToSave[i].perms + "\n";
     string_to_write += "sha256_hexdigest= " + rulesToSave[i].sha + "\n";
@@ -134,7 +132,7 @@ bool RulesFile::save(vector<rule> unsanitizedRules){
   f.close();
 }
 
-
+//TODO: remove because not in use
 //iterate over rulescopy removing all rules which are not *ALWAYS
 //or which are duplicates of other *ALWAYS rules with the same path
 //this will leave us with rulescopy with unique *ALWAYS rules

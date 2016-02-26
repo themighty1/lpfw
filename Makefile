@@ -1,20 +1,19 @@
 g++FLAGS = -g -fpermissive -std=c++11 -Wfatal-errors
-gtestInclude = -I/home/default2/Desktop/githubrepos/lpfw/gtest/include
+gtestInclude = -Igtest/include
 gtestFLAGS = $(g++FLAGS) $(gtestInclude)
 gtestLinkFLAGS = gtest/gtest-all.o gtest/libgtest.a $(gtestInclude)
 
 all: lpfw testprocess tests
 
-clean:
-	rm -rf *.o testprocess lpfw
+clean: rm -rf *.o testprocess lpfw
 
 lpfw: sha256.o conntrack.o \
       argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
       lpfw.cpp lpfw.h common/defines.h common/includes.h \
-      rulesfile.o ruleslist.o
+      rulesfile.o ruleslist.o removeterminatedprocess.o
 	g++ $(g++FLAGS) sha256.o conntrack.o testmain.o \
 	    argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
-      rulesfile.o \
+      rulesfile.o ruleslist.o removeterminatedprocess.o\
 	    lpfw.cpp -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
 sha256.o : sha256/sha256.c sha256/sha256.h sha256/u64.h
@@ -43,6 +42,10 @@ ruleslist.o : ruleslist.cpp ruleslist.h sha256.o
 	g++ $(g++FLAGS) -c ruleslist.cpp
 ruleslist_test.o : ruleslist.o ruleslist_test.cpp
 	g++ $(gtestFLAGS) -c ruleslist_test.cpp
+removeterminatedprocess.o : removeterminatedprocess.cpp removeterminatedprocess.h
+	g++ $(g++FLAGS) -c removeterminatedprocess.cpp
+testexe : testexe.cpp
+	g++ $(g++FLAGS) testexe.cpp -o testexe
 
 
 
@@ -50,7 +53,7 @@ ruleslist_test.o : ruleslist.o ruleslist_test.cpp
 testprocess: testprocess.cpp
 	g++ -g -std=c++11 testprocess.cpp -lpthread -o testprocess
 	
-tests:	all_tests.cpp rulesfile_test.o ruleslist_test.o
+tests:	all_tests.cpp rulesfile_test.o ruleslist_test.o testexe
 	g++ $(g++FLAGS) $(gtestLinkFLAGS) \
 	rulesfile.o rulesfile_test.o ruleslist.o sha256.o ruleslist_test.o \
 	all_tests.cpp -lpthread -o alltests

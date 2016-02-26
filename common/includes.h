@@ -11,7 +11,7 @@
 #include <vector>
 using namespace std;
 
-void die_syscall(string message);
+//void die_syscall(string message);
 
 
 
@@ -25,9 +25,10 @@ struct rule{
   u_int32_t ctmark_in = 0; //conntrack mark assigned to each new connection
   //and used when a user deletes a rule to tell conntrack to immediately
   //drop any existing connections associated with the mark
-  bool is_active = false; //Has process already been seen sending/receiving packets?
-  bool first_instance = true; //TRUE for a first instance of an app or a parent process (not in use?)
   bool is_fixed_ctmark = false; //the user may assign a fixed netfilter mark for conntrack purposes
+  bool is_permanent = false; //true for those rules which were read from rulesfile
+  bool is_forked = false; //whether this process is a fork() of another process IN THE RULES LIST
+  string parentpid = "0"; //(only for is_forked=true) the PID of process from which we fork()ed
   unsigned long long stime = 0; // start time of the process
   vector<long> sockets;//sockets owned by the processes
   string pidfdpath = ""; //path to /proc/PID/fd
@@ -91,7 +92,8 @@ enum
   SOCKET_ZERO_BUT_UID_NOT_ZERO,
   SOCKET_CHANGED_FROM_ZERO, //45
   SEARCH_ACTIVE_PROCESSES_AGAIN,
-  PROCPIDSTAT_DOES_NOT_EXIST
+  PROCPIDSTAT_DOES_NOT_EXIST,
+  GENERAL_ERROR
 };
 
 

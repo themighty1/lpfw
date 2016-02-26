@@ -10,6 +10,7 @@ TEST(RulesFile, savingAndLoading)
   newrule1.perms = ALLOW_ALWAYS;
   newrule1.sha = "deadbeef";
   newrule1.is_fixed_ctmark = false;
+  newrule1.is_permanent = true;
   newrule1.ctmark_in = 21000;
   newrule1.ctmark_out = 11000;
   rule newrule2;
@@ -23,6 +24,7 @@ TEST(RulesFile, savingAndLoading)
   newrule3.perms = DENY_ALWAYS;
   newrule3.sha = "ffffffff";
   newrule3.is_fixed_ctmark = true;
+  newrule3.is_permanent = true;
   newrule3.ctmark_in = 11000;
   newrule3.ctmark_out = 1000;
   //same path as rule 1, should be filtered out
@@ -50,6 +52,7 @@ TEST(RulesFile, savingAndLoading)
     if (!rule1Found && (loadedRules[i].path == newrule1.path)){
       rule1Found = true;
       matchedRule = newrule1;
+      ASSERT_EQ(loadedRules[i].is_permanent, true);
       ASSERT_EQ(loadedRules[i].is_fixed_ctmark, false);
       ASSERT_EQ(loadedRules[i].ctmark_in, 0);
       ASSERT_EQ(loadedRules[i].ctmark_out, 0);
@@ -57,6 +60,7 @@ TEST(RulesFile, savingAndLoading)
     else if (!rule3Found && (loadedRules[i].path == newrule3.path)){
       rule3Found = true;
       matchedRule = newrule3;
+      ASSERT_EQ(loadedRules[i].is_permanent, true);
       ASSERT_EQ(loadedRules[i].is_fixed_ctmark, true);
       ASSERT_EQ(loadedRules[i].ctmark_in, 11000);
       ASSERT_EQ(loadedRules[i].ctmark_out, 1000);
@@ -65,7 +69,6 @@ TEST(RulesFile, savingAndLoading)
       ADD_FAILURE();
     }
 
-    //ASSERT_EQ has problems comparing unicode strings directly
     ASSERT_EQ(loadedRules[i].path == matchedRule.path, true);
     ASSERT_EQ("0", loadedRules[i].pid);
     ASSERT_EQ(matchedRule.perms, loadedRules[i].perms);

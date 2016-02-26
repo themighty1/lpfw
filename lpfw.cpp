@@ -49,6 +49,14 @@
 #include "conntrack.h"
 #include "sha256/sha256.h"
 #include "rulesfile.h"
+#include "ruleslist.h"
+#include "removeterminatedprocess.h"
+
+
+struct pointers_to_classes{
+  RulesFile* rf;
+  RulesList* rl;
+};
 
 using namespace std;
 
@@ -107,7 +115,8 @@ bool conntrack_send_anyway = false; //used to tell ct thread to send stats even 
 int send_rules();
 void log(string);
 
-RulesFile rulesfile;
+RulesFile* rulesFile;
+RulesList* rulesList;
 
 
 void set_awaiting_reply_from_fe(bool toggle){
@@ -370,7 +379,6 @@ int ruleslist_add( const string path, const string pid, const string perms,
   newrule.path = path;
   newrule.pid = pid;
   newrule.perms = perms;
-  newrule.is_active = active;
   newrule.stime = stime;
   //rules added by frontend dont have their sha
   if (sha == "") {
@@ -396,8 +404,7 @@ int ruleslist_add( const string path, const string pid, const string perms,
       newrule.ctmark_in = ctmark + CTMARK_DELTA;
     }
   }
-  newrule.first_instance = first_instance;
-  if (newrule.is_active && newrule.path != KERNEL_PROCESS){
+  if (newrule.path != KERNEL_PROCESS){
     newrule.pidfdpath = "/proc/" + newrule.pid + "/fd/";
     newrule.dirstream = _opendir (newrule.pidfdpath.c_str());
 //    try {
@@ -416,7 +423,7 @@ int ruleslist_add( const string path, const string pid, const string perms,
     _pthread_mutex_lock ( &rules_mutex );
     vector<rule> rulescopy = rules;
     _pthread_mutex_unlock ( &rules_mutex );
-    rulesfile.save(rulescopy);
+    rulesFile->save(rulescopy);
   }
   return retctmark;
 }
@@ -428,12 +435,11 @@ void ruleslist_delete_all ( const string path) {
   _pthread_mutex_lock ( &rules_mutex );
   for(int i=0; i < rules.size(); i++){
     if (rules[i].path != path) continue;
-    if (rules[i].is_active) {
       _closedir (rules[i].dirstream);
       ctmark_to_delete_in = rules[i].ctmark_in;
       ctmark_to_delete_out = rules[i].ctmark_out;
-    }
-    bool was_active = rules[i].is_active;
+
+    bool was_active = true;
     if (rules[i].perms == ALLOW_ALWAYS || rules[i].perms == DENY_ALWAYS){
       bNeedToWriteRulesfile = true;
     }
@@ -454,7 +460,7 @@ void ruleslist_delete_all ( const string path) {
     _pthread_mutex_lock ( &rules_mutex );
     vector<rule> rulescopy = rules;
     _pthread_mutex_unlock ( &rules_mutex );
-    rulesfile.save(rulescopy);
+    rulesFile->save(rulescopy);
   }
   if (bFrontendActive) {
     send_rules();}
@@ -463,7 +469,25 @@ void ruleslist_delete_all ( const string path) {
 
 //Find and delete one entry in rules
 //the calling thread holds the rules mutex
-void ruleslist_delete_one ( const string path, const string pid ) {
+void ruleslist_delete_one ( const string path, const string pid, const string perms ) {
+  ruleslist_rv rv = rulesList->removeInactive(path, perms, pid);
+  if (!rv.success) {
+    cout << rv.errormsg << endl;
+    return;
+  }
+  assert(rv.ctmarks_to_delete.size() <= 1);
+  if (rv.ctmarks_to_delete.size() == 1){
+    ctmark_to_delete_in = rv.ctmarks_to_delete[0].in;
+    ctmark_to_delete_out = rv.ctmarks_to_delete[0].out;
+    _pthread_mutex_lock(&condvar_mutex);
+    predicate = TRUE;
+    _pthread_mutex_unlock(&condvar_mutex);
+    _pthread_cond_signal(&condvar);
+  }
+  return;
+
+
+/*
   for(int i=0; i < rules.size(); i++){
     if (rules[i].path != path || rules[i].pid != pid) continue;
     //else found
@@ -482,18 +506,18 @@ void ruleslist_delete_one ( const string path, const string pid ) {
     return; // and return
   }
   die(); //Fatal: couldnt find the rule to delete
+
+  */
 }
 
 
 //Search cache which thread_build_pid_and_socket_cache built
 int search_pid_and_socket_cache(const long socket_in, string &path_out,
                                     string &pid_out, int &ctmark_out){
-  _pthread_mutex_lock ( &rules_mutex );
-  vector<rule> rulescopy = rules;
-  _pthread_mutex_unlock ( &rules_mutex );
+  vector<rule> rulescopy = rulesList->get_rules_copy();
   int i,j,retval;
   for(i = 0; i < rulescopy.size(); i++){
-    if (! rulescopy[i].is_active) continue;
+    if (rulescopy[i].is_permanent) continue;
     for(j=0; j < rulescopy[i].sockets.size(); ++j){
       if (rulescopy[i].sockets[j] != socket_in) {continue;}
       if (rulescopy[i].perms == ALLOW_ONCE || rulescopy[i].perms == ALLOW_ALWAYS) {
@@ -619,10 +643,8 @@ void tcp_server_process_messages(int newsockfd) {
       ruleslist_delete_all(path);
     }
     else if (comm == "WRITE"){ //Not in use
-      _pthread_mutex_lock ( &rules_mutex );
-      vector<rule> rulescopy = rules;
-      _pthread_mutex_unlock ( &rules_mutex );
-      rulesfile.save(rulescopy);
+      vector<rule> rulescopy = rulesList->get_rules_copy();
+      rulesFile->save(rulescopy);
     }
     else if (comm == "ADD"){ //ADD path pid perms
       log("DEBUG:ADDing a rule " + string_parts[1]);
@@ -636,9 +658,6 @@ void tcp_server_process_messages(int newsockfd) {
         set_awaiting_reply_from_fe(false);
         continue;
       }
-      else if (path == "KERNEL_PROCESS"){
-        ruleslist_add(KERNEL_PROCESS, pid, perms, TRUE, "", 0, 0 ,TRUE);
-      }
       else {
         //Even if we check that proc/<PID>/exe matches and sha256 matches,
         //with executables like python, the attacker could kill the initial process,
@@ -651,6 +670,7 @@ void tcp_server_process_messages(int newsockfd) {
           set_awaiting_reply_from_fe(false);
           continue;
         }
+       rulesList->addFromUser(path, pid, perms, atoi(sent_stime.c_str()));
        ruleslist_add(path, pid, perms, true, "", atoi(sent_stime.c_str()), 0 ,TRUE);
        set_awaiting_reply_from_fe(false);
        requestQueue = queue<string>(); //clear the queue
@@ -717,8 +737,18 @@ void* thread_tcp_server ( void *data ) {
 }
 
 
-//scan procfs and remove/mark inactive those processes that are no longer running
 void* thread_refresh ( void* ptr ){
+  prctl(PR_SET_NAME,"refresh",0,0,0);
+  pointers_to_classes* p = (pointers_to_classes*)ptr;
+  RulesList* rl = p->rl;
+  RulesFile* rf = p->rf;
+  free(ptr);
+  //rtp does not return from endless loop
+  RemoveTerminatedProcess rtp(rl, rf);
+}
+
+//scan procfs and remove/mark inactive those processes that are no longer running
+void* thread_refresh_old ( void* ptr ){
   prctl(PR_SET_NAME,"refresh",0,0,0);
   ptr = 0;     //to prevent gcc warnings of unused variable
   char exe_path[PATHSIZE];
@@ -727,17 +757,17 @@ void* thread_refresh ( void* ptr ){
 
   while (true){
     thisIterationHadAnUpdate = false;
-    _pthread_mutex_lock ( &rules_mutex );
+    vector<rule> rules = rulesList->get_rules_copy();
     for(int i=0; i < rules.size(); i++){
        //only interested in processes which produced some traffic already
-       if (!rules[i].is_active || rules[i].path == KERNEL_PROCESS) continue;
+       //if (!rules[i].is_active) continue;
        string proc_pid_exe = "/proc/" + rules[i].pid + "/exe";
        memset ( exe_path, 0, PATHSIZE );
        //readlink doesn't fail if PID is running
        if ( readlink ( proc_pid_exe.c_str(), exe_path, PATHSIZE ) != -1 ) continue;
        //else the PID is not running anymore
        if (rules[i].perms == ALLOW_ONCE || rules[i].perms == DENY_ONCE){
-         ruleslist_delete_one ( rules[i].path, rules[i].pid );
+         ruleslist_delete_one ( rules[i].path, rules[i].perms, rules[i].pid );
          //To keep this function's logic simple we dont iterate anymore
          //(although we could) but break the for loop
          thisIterationHadAnUpdate = true;
@@ -754,25 +784,28 @@ void* thread_refresh ( void* ptr ){
            if (rules[j].path != rules[i].path) continue;
            if (rules[j].perms != rules[i].perms) continue;
            bFoundAnotherOne = true;
-           ruleslist_delete_one ( rules[i].path, rules[i].pid );
-           vector<rule> rulescopy = rules;
-           rulesfile.save(rulescopy);
+           ruleslist_delete_one ( rules[i].path, rules[i].pid , rules[i].perms);
+           vector<rule> rulescopy = rulesList->get_rules_copy();
+           rulesFile->save(rulescopy);
            thisIterationHadAnUpdate = true;
            break;
          }
          if (bFoundAnotherOne){break;} //out of rules iteration
          //else this is the only *ALWAYS rule with such PATH
+         //rulesList->mark_inactive(rules[i].path, rules[i].pid);
+
+         /*
          rules[i].pid = "0";
          rules[i].is_active = false;
          //conntrack marks will be used by the next instance of app
          vector<u_int32_t>ctmarks = get_ctmarks();
          rules[i].ctmark_in = ctmarks[0];
          rules[i].ctmark_out = ctmarks[1];
+         */
          thisIterationHadAnUpdate = true;
          break; //out of rules iteration
        }
     } //for(int i=0; i < rules.size(); i++)
-    _pthread_mutex_unlock ( &rules_mutex );
 
     if (thisIterationHadAnUpdate){
       prevIterationHadAnUpdate = true;
@@ -817,9 +850,9 @@ void rules_load(){
         newrule.perms = permission;
         newrule.sha = sha256_hexdigest;
         newrule.pid = "0";
-        newrule.is_active = false;
+        //newrule.is_active = false;
         newrule.stime = 0;
-        newrule.first_instance = true;
+        //newrule.first_instance = true;
         newrule.ctmark_out = 0;
         newrule.ctmark_in = 0;
         if (is_conntrack_mark_found){
@@ -910,22 +943,23 @@ void rules_save(bool mutex_being_held){
     }
   }
   //write rules
-  rulesfile.save(rulescopy);
+  rulesFile->save(rulescopy);
 }
 
 
 //This function may be called on 3 occasions:
-//1. A rule which was loaded on startup has seen its first packet
 //2. socket_active_processes_search() didnt find the process because
 ///proc/<PID>/fd socket entry wasn't yet created
 //3. (most usual case) A process associated with socket was found and now we need to check
 //if another rule with the same path is in rules. If so, we are either a fork()ed child or a new instance
+
+
+
+/*
 int path_find_in_rules ( int &ctmark_out, const string path_in,
                              const string pid_in, unsigned long long stime_in, bool going_out){
-  _pthread_mutex_lock ( &rules_mutex );
-  vector<rule> rulescopy = rules;
-  _pthread_mutex_unlock ( &rules_mutex );
 
+  vector<rule> rulescopy = rulesList->get_rules_copy();
   vector<rule> rulesWithTheSamePath;
   int i,retval;
   for(i = 0; i < rulescopy.size(); ++i) {
@@ -934,119 +968,54 @@ int path_find_in_rules ( int &ctmark_out, const string path_in,
         //socket_active_processes_search() didnt pick it up, try again
         return SEARCH_ACTIVE_PROCESSES_AGAIN;
       }
-      rulesWithTheSamePath.push_back(rulescopy[i]);
+      if (rulescopy[i].is_permanent){
+        rulesWithTheSamePath.push_back(rulescopy[i]);
+      }
     }
   }
   if (!rulesWithTheSamePath.size()) {return PATH_IN_RULES_NOT_FOUND;}
-  if (!rulesWithTheSamePath[0].is_active){
-    //A rule which was loaded on startup has seen its first packet
-    rule loaded_rule = rulesWithTheSamePath[0];
-    string sha = get_sha256_hexdigest(loaded_rule.path.c_str());
-    if (sha == "CANT_READ_EXE") {return CANT_READ_EXE; }
-    if (loaded_rule.sha != sha) {return SHA_DONT_MATCH; }
-    _pthread_mutex_lock ( &rules_mutex );
-    bool bRuleFound = false;
-    //find the rule again (in case rules have changed while the lock was not held)
-    for(i = 0; i < rules.size(); ++i) {
-      if (rules[i].path != loaded_rule.path) continue;
-      //else
-      rules[i].pid = pid_in;
-      rules[i].is_active = true;
-      rules[i].stime = stime_in;
-      rules[i].pidfdpath = "/proc/" + pid_in + "/fd/";
-      DIR *dirstream = opendir(rules[i].pidfdpath.c_str());
-      //if the app immediately terminated we may get NULL
-      if (dirstream != NULL) rules[i].dirstream = dirstream;
-      if (! rules[i].is_fixed_ctmark){
-        vector<u_int32_t>ctmarks = get_ctmarks();
-        rules[i].ctmark_in = ctmarks[0];
-        rules[i].ctmark_out = ctmarks[1];
-      }
-      if (going_out) ctmark_out = rules[i].ctmark_out;
-      else ctmark_out = rules[i].ctmark_in;
-      _pthread_mutex_unlock ( &rules_mutex );
-      bRuleFound = true;
+
+  //Find this process's parent process' PID
+  string proc_stat_path = "/proc/" + pid_in + "/stat";
+  FILE *stream1;
+  if ( (stream1 = fopen ( proc_stat_path.c_str(), "r" ) ) == NULL ) return PROCFS_ERROR;
+  char ppid[16];
+  fscanf ( stream1, "%*s %*s %*s %s", ppid );
+  fclose ( stream1);
+
+  //If parent's PID is present in rules, then we are dealing with a fork()
+  for(i = 0; i < rulesWithTheSamePath.size(); i++) {
+    if (rulesWithTheSamePath[i].pid != ppid) continue;
+    rule parent_rule = rulesWithTheSamePath[i];
+    if (parent_rule.is_forked){
+      //We dont allow a fork() of a fork() as it would create a bookkeeping mess
+      //So, to keep it simple we treat this process as a new instance
       break;
     }
-    assert (bRuleFound);
+    if (parent_rule.perms == ALLOW_ALWAYS || parent_rule.perms == ALLOW_ONCE){
+      retval = FORKED_CHILD_ALLOW;}
+    else if (parent_rule.perms == DENY_ALWAYS || parent_rule.perms == DENY_ONCE){
+      retval = FORKED_CHILD_DENY;}
 
-    if (loaded_rule.perms == ALLOW_ALWAYS) { retval = PATH_FOUND_IN_DLIST_ALLOW; }
-    else if (loaded_rule.perms == DENY_ALWAYS) { retval = PATH_FOUND_IN_DLIST_DENY; }
-    else die("inactive_rule.perms != *_ALWAYS"); //should never get here
-    if (bFrontendActive) {
-     send_rules();
-    }
+    ruleslist_rv rv =  rulesList->addForked( path_in, pid_in, ppid, parent_rule.perms,
+                    parent_rule.sha, parent_rule.ctmark_out );
+    if (!rv.success) {return GENERAL_ERROR;}
+    ctmark_out = rv.ctmark;
+    //TODO: how to get in touch with frontend?
+    //if (bFrontendActive) {send_rules();}
     return retval;
   }
 
-  else if (rulesWithTheSamePath[0].is_active){
-    for(i = 0; i < rulesWithTheSamePath.size(); ++i) {
-      assert(rulesWithTheSamePath[i].is_active);
-    }
-    //determine if this is a new instance or a fork()d child. Here is how:
-    //
-    // 1. Get new process's(NP) PPID.(parent PID)
-    // 2. Is there a rule with the same PATH as NP AND PID == PPID?
-    // 3. If no then we have a new instance, go to step A1
-    // 4. If yes, we have a fork()ed process, go to step B1
-    //
-    // A1. Are there rules with the same PATH as NP AND *ALWAYS perms? If yes,
-    //then create a new rule, copy parent's attributer over to NP and continue;
-    // A2. If No, i.e. there either aren't any rules with the same PATH as NP OR
-    //there are rules with the same path as NP AND *ONCE perms, then query user.
-    //
-    // B1. Create a new rule, copy parent's attributes over to NP and continue.
-    // --------------------------
-
-    string proc_stat_path = "/proc/" + pid_in + "/stat";
-    FILE *stream1;
-    if ( (stream1 = fopen ( proc_stat_path.c_str(), "r" ) ) == NULL ) return PROCFS_ERROR;
-    char ppid[16];
-    fscanf ( stream1, "%*s %*s %*s %s", ppid );
-    _fclose ( stream1);
-
-    //is it a fork()ed child? Find the real parent.
-    for(i = 0; i < rulesWithTheSamePath.size(); i++) {
-      if (rulesWithTheSamePath[i].pid != ppid) continue;
-      //we get here if we have a fork()ed child
-      log("DEBUG:***********FOUND A FORKED CHILD");
-      rule parent_rule = rulesWithTheSamePath[i];
-      if (parent_rule.perms == ALLOW_ALWAYS || parent_rule.perms == ALLOW_ONCE){
-        retval = FORKED_CHILD_ALLOW;}
-      else if (parent_rule.perms == DENY_ALWAYS || parent_rule.perms == DENY_ONCE){
-        retval = FORKED_CHILD_DENY;}
-      unsigned long long stime = starttimeGet ( atoi ( pid_in.c_str() ) );
-      ctmark_out = ruleslist_add ( path_in, pid_in, parent_rule.perms, TRUE,
-                                   parent_rule.sha, stime, 0, FALSE );
-      if (bFrontendActive) {
-        send_rules();
-      }
-      return retval;
-    }
-    //we get here when we have a new instance,
-    //check that instance launched from unmodified binary
-    string sha = get_sha256_hexdigest(path_in.c_str());
-    if (sha == "CANT_READ_EXE") {return CANT_READ_EXE; }
-    if (sha != rulesWithTheSamePath[0].sha ) {return SHA_DONT_MATCH; }
-    // A1. Are there any rules with the same PATH as NP AND *ALWAYS perms? If yes,
-    // then create new rule, copy parent's attributes over to NP and continue;
-    // A2. If No, i.e. there either aren't any rules with the same PATH as NP OR
-    //there are entries with the same path as NP AND *ONCE perms, then query user.
-    for(i = 0; i < rulesWithTheSamePath.size(); ++i) {
-      if (!(rulesWithTheSamePath[i].perms == ALLOW_ALWAYS ||
-            rulesWithTheSamePath[i].perms == DENY_ALWAYS)) continue;
-      //else
-      ctmark_out = ruleslist_add ( path_in, pid_in, rulesWithTheSamePath[i].perms,
-                                   TRUE, rulesWithTheSamePath[i].sha, stime_in, 0 ,FALSE);
-      if (bFrontendActive) {
-        send_rules();
-      }
-      if (rulesWithTheSamePath[i].perms == ALLOW_ALWAYS) return NEW_INSTANCE_ALLOW;
-      else if (rulesWithTheSamePath[i].perms == DENY_ALWAYS) return NEW_INSTANCE_DENY;
-    }
-    return PATH_IN_RULES_FOUND_BUT_PERMS_ARE_ONCE;
-  } //else if (rulescopy[i].is_active){
+  //We are dealing with a new instance. Is is_permanent rule present for this path?
+  for(i = 0; i < rulesWithTheSamePath.size(); i++) {
+    if (!rulesWithTheSamePath[i].is_permanent) continue;
+    rule parent = rulesWithTheSamePath[i];
+    rulesList->addNewInstance(path_in, pid_in, parent.perms, parent.sha, parent.ctmark_out);
+  }
+  //if new instance and cant find is_permanent, query the user
+  return PATH_IN_RULES_FOUND_BUT_PERMS_ARE_ONCE;
 }
+*/
 
 
 //Try to find the socket among the active processes in lpfw rules
@@ -1065,7 +1034,7 @@ int socket_active_processes_search ( const long mysocket_in, string &m_path_out,
   string find_socket = "socket:[" + to_string(mysocket_in) + "]";
   int i;
   for(i = 0; i < rulescopy.size(); i++) {
-    if (!rulescopy[i].is_active || rulescopy[i].path == KERNEL_PROCESS) continue;
+    if (rulescopy[i].is_permanent) continue;
     path_dir = "/proc/" + rulescopy[i].pid + "/fd/";
     if ( ! ( m_dir = opendir ( path_dir.c_str() ) ) ) {
       //This condition can happen if process is still in the rules list,
@@ -1584,11 +1553,25 @@ int socket_handle ( const long socket_in, int &ctmark_out, string &path_out,
         die();
       }
     }
-    retval = path_find_in_rules ( ctmark_out, path_out, pid_out, stime_out, true);
+    //retval = path_find_in_rules ( ctmark_out, path_out, pid_out, stime_out, true);
+
+    ruleslist_rv rv = rulesList->pathFindAndAdd(path_out, pid_out, stime_out);
+    if (!rv.success){
+      return rv.value;
+    }
+
+    if (rv.value == SEARCH_ACTIVE_PROCESSES_AGAIN){
+    cout << "DEBUG:**********************SEARCHING AGAIN*****************";
+    retval = socket_active_processes_search ( socket_in, path_out, pid_out, ctmark_out );
+    }
+
+
+
     if (retval == SEARCH_ACTIVE_PROCESSES_AGAIN){
       log("DEBUG:**********************SEARCHING AGAIN*****************");
       retval = socket_active_processes_search ( socket_in, path_out, pid_out, ctmark_out );
     }
+    //must return
     return retval;
   }
   assert (false); //should never get here
@@ -1718,12 +1701,13 @@ int socket_handle_icmp(int &ctmark_out, string &path_out,
   if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND) {return retval;}
   retval = socket_procpidfd_search (socket, path_out, pid_out, stime_out);
   if (retval != SOCKET_FOUND_IN_PROCPIDFD) {return retval;}
-  retval = path_find_in_rules (ctmark_out, path_out, pid_out, stime_out, true);
+  //retval = path_find_in_rules (ctmark_out, path_out, pid_out, stime_out, true);
   return retval;
 }
 
 
 //Not in use
+/*
 int inkernel_get_verdict(const char *ipaddr_in, int &ctmark_out) {
   _pthread_mutex_lock ( &rules_mutex );
   for(int i = 0; i < rules.size(); i++){
@@ -1743,7 +1727,7 @@ int inkernel_get_verdict(const char *ipaddr_in, int &ctmark_out) {
   _pthread_mutex_unlock(&rules_mutex);
   return INKERNEL_IPADDRESS_NOT_IN_DLIST;
 }
-
+*/
 
 int send_request (const string path, const string pid, const string starttime,
              const string raddr, const string rport, const string lport, const int direction) {
@@ -1761,7 +1745,7 @@ int send_rules() {
   _pthread_mutex_lock ( &rules_mutex );
   string message = "RULES_LIST\n";
   for(int k=0; k < rules.size(); k++){
-    string is_active = rules[k].is_active ? "TRUE": "FALSE";
+    string is_active = !rules[k].is_permanent ? "TRUE": "FALSE";
     message += rules[k].path + '\n' + rules[k].pid + '\n' + rules[k].perms + '\n'
         + is_active + '\n' + to_string(rules[k].ctmark_out) + " CRLF ";
   }
@@ -1906,8 +1890,11 @@ int nfq_handle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
       //There was a small window when we were inside socket_handle_out
       //for the frontend to respond. So, we double-check that the path
       //we are about to query was not added to the rules during that small window
-      verdict = path_find_in_rules (ctmark, path, pid, starttime, true);
-      if (verdict == PATH_IN_RULES_NOT_FOUND || verdict == PATH_IN_RULES_FOUND_BUT_PERMS_ARE_ONCE) {
+      ruleslist_rv rv = rulesList->pathFindAndAdd(path, pid, starttime);
+
+      //verdict = path_find_in_rules (ctmark, path, pid, starttime, true);
+
+      if (rv.value == PATH_IN_RULES_NOT_FOUND || rv.value == PATH_IN_RULES_FOUND_BUT_PERMS_ARE_ONCE) {
         verdict = send_request(path, pid, to_string(starttime), string(raddr),
                              to_string(lport_hostbo), to_string(rport_hostbo), direction);
       }
@@ -2336,6 +2323,7 @@ void open_proc_net_files()
 //}
 
 
+
 int main ( int argc, char *argv[] )
 {
   parse_command_line(argc, argv);
@@ -2357,8 +2345,9 @@ int main ( int argc, char *argv[] )
 
   pidfile_check();
   if (!bTestingMode) {
-    rulesfile = RulesFile(rules_file);
-    vector<rule> rulesFromFile = rulesfile.read();
+    rulesFile = new RulesFile(rules_file);
+    vector<rule> rulesFromFile = rulesFile->read();
+    rulesList = new RulesList(rulesFromFile);
     for (int i=0; i<rulesFromFile.size(); i++){
       rules.push_back(rulesFromFile[i]);
     }
@@ -2373,7 +2362,12 @@ int main ( int argc, char *argv[] )
   capabilities_modify(CAP_SYS_PTRACE, CAP_EFFECTIVE, CAP_SET);
   init_nfqueue();
 
-  _pthread_create ( &refresh_thr, (pthread_attr_t *)NULL, thread_refresh, (void *)NULL );
+
+  pointers_to_classes* p = (pointers_to_classes*)malloc(sizeof(pointers_to_classes));
+  p->rf = rulesFile;
+  p->rl = rulesList;
+
+  _pthread_create ( &refresh_thr, (pthread_attr_t *)NULL, thread_refresh, (void *)p );
   _pthread_create ( &tcp_server_thr, (pthread_attr_t *)NULL, thread_tcp_server,(void *)NULL);
   if (bTestingMode) {
     _pthread_create ( &test_thr, (pthread_attr_t *)NULL, thread_test,(void *)NULL);

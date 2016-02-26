@@ -1,0 +1,10 @@
+.
+argtable
+common
+gtest/include/gtest
+gtest/include/gtest/internal
+gtest/samples
+gtest/src
+gtest/test
+gtest/xcode/Samples/FrameworkSample
+sha256
