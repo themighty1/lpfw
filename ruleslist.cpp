@@ -163,11 +163,11 @@ ruleslist_rv RulesList::addNewInstance ( const string path, const string pid, co
 //add a process which was fork()ed from another process which was already in the ruleslist
 //Note: the forked process' traffic is counted towards the parent's traffic
 //Note: the forked process is not shown to the user
-//Note: if the parent process terminates then despite the act that the fork()ed process
+//Note: if the parent process terminates then despite the fact that the fork()ed process
 //may still be running, the parent process with all its fork()ed processes
 //will be removed from ruleslist
 //and upon further traffic, the fork()ed process will be added to the rules list
-//as a normal non-is_forked rule
+//as a normal (not is_forked) rule
 void RulesList::addForked ( const string path, const string pid, const string parentpid,
                                       const string perms, const string sha, const int ctmark){
   rule newrule;
@@ -214,7 +214,8 @@ ruleslist_rv RulesList::addFromUser ( const string path, const string pid,
   ruleslist_rv rv;
 
   try{
-  newrule.sha = get_sha256_hexdigest(path);
+  string sha = get_sha256_hexdigest(path);
+  newrule.sha = sha;
 
   //make sure that there is no (deleted) suffix in the path name
   cout << "will readlink " << (path_to_proc + pid + "/exe") << endl;
@@ -244,6 +245,7 @@ ruleslist_rv RulesList::addFromUser ( const string path, const string pid,
     rule permanent_rule;
     permanent_rule.path = path;
     permanent_rule.perms = perms;
+    permanent_rule.sha = sha;
     permanent_rule.is_permanent = true;
     push(permanent_rule);
   }
@@ -433,7 +435,7 @@ string RulesList::get_parent_pid(string child_pid){
   string proc_stat_path = "/proc/" + child_pid + "/stat";
   FILE *stream1 = fopen ( proc_stat_path.c_str(), "r" );
   if ( stream1 == NULL ) {
-    throw "PROCFS_ERROR in get_parent_pid";
+    throw string("PROCFS_ERROR in get_parent_pid");
   }
   char ppid[16];
   fscanf ( stream1, "%*s %*s %*s %s", ppid );
@@ -477,7 +479,7 @@ void RulesList::push(rule newrule){
         cout << "Duplicate: path " << newrule.path << " pid "
              << newrule.pid << endl;
         _pthread_mutex_unlock ( &rules_mutex );
-        throw("Cannot push duplicate rule");
+        throw string("Cannot push duplicate rule");
     }
   }
   rules.push_back(newrule);

@@ -51,6 +51,7 @@ private:
   string get_parent_pid(string child_pid);
   vector<rule> rules;
   pthread_mutex_t rules_mutex;
+  //todo ctmark_* vars can be made static inside RulesList::get_ctmarks()
   u_int32_t ctmark_count;
   pthread_mutex_t ctmark_mutex;
   string path_to_proc = "/proc/"; //unittests change this to from /proc/ to /tmp/

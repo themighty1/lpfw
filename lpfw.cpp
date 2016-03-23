@@ -741,10 +741,9 @@ void* thread_refresh ( void* ptr ){
   prctl(PR_SET_NAME,"refresh",0,0,0);
   pointers_to_classes* p = (pointers_to_classes*)ptr;
   RulesList* rl = p->rl;
-  RulesFile* rf = p->rf;
   free(ptr);
   //rtp does not return from endless loop
-  RemoveTerminatedProcess rtp(rl, rf);
+  RemoveTerminatedProcess rtp(rl);
 }
 
 //scan procfs and remove/mark inactive those processes that are no longer running

@@ -18,9 +18,9 @@ using namespace std;
 
 struct rule{
   string path = ""; //path to executable
-  string pid = "0"; //its pid (or IP address for kernel processes)
+  string pid = "0"; //process ID
   string perms = "DENY ALWAYS"; // permission in the form "ALLOW ALWAYS"
-  string sha = ""; //sha256 hexdigest
+  string sha = ""; //sha256 hexdigest (uppercase)
   u_int32_t ctmark_out = 0;
   u_int32_t ctmark_in = 0; //conntrack mark assigned to each new connection
   //and used when a user deletes a rule to tell conntrack to immediately

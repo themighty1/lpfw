@@ -1,9 +1,10 @@
 #include "gtest/gtest.h"
 #include "ruleslist.h"
+#include "unix_socket.h"
 #include <fstream>
+#include <signal.h> //for kill()
+#include <stdio.h>
 #include <unistd.h> //for symlink()
-#include <sys/socket.h>
-#include <sys/un.h>
 
 //creates dirs recursively up until the last dir in the path
 static void _mkdir(const char *dir) {
@@ -22,6 +23,17 @@ static void _mkdir(const char *dir) {
                         *p = '/';
                 }
         mkdir(tmp, S_IRWXU);
+}
+
+unsigned long long stime_for_pid(string pid){
+    char stime[16];
+    FILE* fp = popen(("awk '{printf $22}' /proc/" + pid + "/stat").c_str(), "r");
+    if (fp == NULL) {
+        printf("Failed to run command\n" );
+        exit(1);
+    }
+    fgets(stime, sizeof(stime)-1, fp);
+    return atoll(stime);
 }
 
 
@@ -120,43 +132,26 @@ TEST_F(RulesListTest, constructor){
 }
 
 TEST_F(RulesListTest, addFromUser){
-  string new1path = "/tmp/new1";
-  string new1hash = "2AC8A140BD002C6D2F46A980AEAD578B14D1F36978ABD34825787681FD7E091F";
-  ofstream f1(new1path);
-  f1 << "rule3";
-  f1.close();
-  _mkdir("/tmp/3333/fd");
-
-  string new2path = "/rule4";
-  string new2pid = "19203";
-  string new2perms = ALLOW_ALWAYS;
-  string new2sha = "DEADBEEF";
-  unsigned long long new2stime = 1234567;
-  u_int32_t new2ctmark = 15243;
-
   system("rm -f -R /tmp/1"); //remove dir from previous test iteration (if any)
   system("rm -f -R /tmp/2");
+  system("rm -f /tmp/testexe"); //remove from prev test run
+  system("cp testexe /tmp/");
 
-  cout << "subtest1" << endl;
-  //should fail because path is non-existent
-  ruleslist_rv rv1 = rulesList->addFromUser("/fail", "1", ALLOW_ONCE, 123456);
+  cout << "subtest1. fail because path is non-existent" << endl;
+  ruleslist_rv rv1 = rulesList->addFromUser("/non-existent_path", "1", ALLOW_ONCE, 123456);
   ASSERT_EQ(rv1.success, false);
   ASSERT_EQ(rv1.errormsg == "fopen error in get_sha256_hexdigest", true);
 
-  cout << "subtest2" << endl;
-  //fail because there is no /proc/PID/exe entry
-  ofstream f2("/tmp/existing_path");
-  f2.close();
-  ruleslist_rv rv2 = rulesList->addFromUser("/tmp/existing_path", "1", ALLOW_ONCE, 1);
+  cout << "subtest2. fail because there is no /proc/<PID>/exe symlink" << endl;
+  ruleslist_rv rv2 = rulesList->addFromUser("/tmp/testexe", "1", ALLOW_ONCE, 1);
   ASSERT_EQ(rv2.success, false);
   cout << rv2.errormsg << endl;
   ASSERT_EQ(rv2.errormsg == "_readlink() error", true);
 
-  cout << "subtest3" << endl;
-  //create a symlink /proc/PID/exe which points to a wrong path
+  cout << "subtest3. fail because symlink /proc/<PID>/exe points to a wrong path" << endl;
   _mkdir("/tmp/1");
   symlink("/incorrect/path", "/tmp/1/exe");
-  ruleslist_rv rv3 = rulesList->addFromUser("/tmp/existing_path", "1", ALLOW_ONCE, 123456);
+  ruleslist_rv rv3 = rulesList->addFromUser("/tmp/testexe", "1", ALLOW_ONCE, 123456);
   ASSERT_EQ(rv3.success, false);
   cout << rv3.errormsg << endl;
   ASSERT_EQ(rv3.errormsg == "/proc/PID/exe points to an unexpected path", true);
@@ -165,111 +160,175 @@ TEST_F(RulesListTest, addFromUser){
   //symlink gets a [removed] suffix
   //TODO: implement later or inside a separate test
 
-  cout << "subtest4" << endl;
-  //fail because /proc/PID/stat is not present
-  ofstream f3("/tmp/existing_path2");
-  f3.close();
+  cout << "subtest4. fail because /proc/<PID>/stat is not present" << endl;
   _mkdir("/tmp/2");
-  symlink("/tmp/existing_path2", "/tmp/2/exe");
-  ruleslist_rv rv4 = rulesList->addFromUser("/tmp/existing_path2", "2", ALLOW_ONCE, 1);
+  symlink("/tmp/testexe", "/tmp/2/exe");
+  ruleslist_rv rv4 = rulesList->addFromUser("/tmp/testexe", "2", ALLOW_ONCE, 1);
   ASSERT_EQ(rv4.success, false);
   cout << rv4.errormsg << endl;
   ASSERT_EQ(rv4.errormsg == "stream == NULL in get_starttime", true);
 
-  cout << "subtest5" << endl;
-  //copy a simple exe to /tmp, launch, get pid and pass incorrect stime
-  system("rm -f /tmp/testexe"); //remove from prev test run
-  system("cp testexe /tmp/");
+  cout << "subtest5. fail because wrong process starttime" << endl;
   pid_t child_pid = fork();
   if (child_pid == 0){
-      //child
-      cout << "child pid is " << getpid() << endl;
-      execl("/tmp/testexe", (char*) 0);
+      execl("/tmp/testexe", (char*)0); // we are in child
   }
   //we are in parent and pid is child's pid
   string pid = to_string(child_pid);
+  unix_socket_block("/tmp/lpfwtest" + pid);
 
-  //listen for a connection on unix socket
-  //accept()ed connection indicates that the exec() child started
-  struct sockaddr_un addr;
-  string socket_path = "/tmp/lpfwtest" + pid;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path)-1);
-  unlink(socket_path.c_str());
-  int fd, cl;
-  if ( (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-      perror("socket error");
-      exit(-1);
-    }
-  if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-      perror("bind error");
-      exit(-1);
-  }
-  if (listen(fd, 5) == -1) {
-      perror("listen error");
-      exit(-1);
-  }
-  //will block here until accept()
-  if ( (cl = accept(fd, NULL, NULL)) == -1) {
-   perror("accept error");
-   exit(-1);
- }
- cout << "child started!!!";
-  //return path_to_proc to normal as this is a real process
+
+  //return path_to_proc to normal because this is a real process
   f.setPathToProc(rulesList, "/proc/");
   ruleslist_rv rv5 = rulesList->addFromUser("/tmp/testexe", pid, ALLOW_ONCE, 1122);
-  //terminate the child process
-  system(("kill -s USR1 " + pid).c_str());
   ASSERT_EQ(rv5.success, false);
   cout << rv5.errormsg << endl;
   ASSERT_EQ(rv5.errormsg == "Starttime change detected", true);
 
+  //TODO: later test _readlink separately
+  //make sure that when we delete the running process's exe on disk, its
+  // /proc/PID/exe also changes (receives a suffix (deleted) )
+  /*
+  system("rm -f /tmp/testexe");
+  ruleslist_rv rv6 = rulesList->addFromUser("/tmp/testexe", pid, ALLOW_ONCE, 1122);
+  ASSERT_EQ(rv6.success, false);
+  cout << rv6.errormsg << endl;
+  ASSERT_EQ(rv6.errormsg == "/proc/PID/exe points to an unexpected path", true);
+  */
 
+  //TODO also test _opendir separately
 
+  cout << "subtest 7. Add a rule" << endl;
+  //add a correct rule and check if it was added to rules
+  //with correct sha256 and stime etc.
+  ruleslist_rv rv7 = rulesList->addFromUser("/tmp/testexe", pid, ALLOW_ALWAYS,
+                                            stime_for_pid(pid));
+  ASSERT_EQ(rv7.success, true);
 
-/*
-  //check later that pidfdpath is set correctly and
-  //dirstream is NULL and sha is set and ctmark is set
-  ruleslist_rv rv2 = rulesList->addFromUser(new2path, new2pid, new2perms, new2stime);
-  ASSERT_EQ(rv2.success, true);
-  //check later that hashing gave correct result and that ctmarks are assigned
-  ruleslist_rv rv3 = rulesList->addFromUser(new1path, "3333", ALLOW_ONCE, 123456);
-  ASSERT_EQ(rv3.success, true);
-  //a duplicate rule must be rejected
-  ruleslist_rv rv4 = rulesList->addFromUser(new1path, "3333", DENY_ONCE, 123456);
-  ASSERT_EQ(rv4.success, false);
-
-  vector<rule> copy = rulesList->get_rules_copy();
-  ASSERT_EQ(copy.size(), init_rules.size() + 2);
-  bool bnew1Found = false;
-  bool bnew2Found = false;
-  for (int i=0; i < copy.size(); i++){
-    if (! bnew1Found && copy[i].path == new1path){
-      bnew1Found = true;
-      ASSERT_EQ(copy[i].sha == new1hash, true);
-      ASSERT_EQ(copy[i].ctmark_out > 0, true);
-      ASSERT_EQ(copy[i].ctmark_in > 0, true);
-      ASSERT_EQ(copy[i].ctmark_in - copy[i].ctmark_out == CTMARK_DELTA, true);
-      continue;
-    }
-    else if (! bnew2Found && copy[i].path == new2path){
-      bnew2Found = true;
-      ASSERT_EQ(copy[i].pid == new2pid, true);
-      ASSERT_EQ(copy[i].perms == new2perms, true);
-      ASSERT_EQ(copy[i].sha == new2sha, true);
-      ASSERT_EQ(copy[i].stime == new2stime, true);
-      ASSERT_EQ(copy[i].ctmark_out == new2ctmark, true);
-      ASSERT_EQ(copy[i].ctmark_in - copy[i].ctmark_out == CTMARK_DELTA, true);
-      ASSERT_EQ(copy[i].is_fixed_ctmark, false);
-      ASSERT_EQ(copy[i].pidfdpath == ("/tmp/" + new2pid + "/fd/"), true);
-      ASSERT_EQ(copy[i].dirstream == NULL, true);
-    }
+  cout << "subtest 8. fail because a duplicate rule is being added" << endl;
+  ruleslist_rv rv8 = rulesList->addFromUser("/tmp/testexe", pid, DENY_ALWAYS, stime_for_pid(pid));
+  ASSERT_EQ(rv8.success, false);
+  cout << rv8.errormsg << endl;
+  ASSERT_EQ(rv8.errormsg == "Cannot push duplicate rule", true);
+  
+  cout << "subtest 9. make sure the rule was added with correct data" << endl;
+  //get sha
+  char sha[66];
+  FILE* fp2 = popen("sha256sum /tmp/testexe | awk \'{printf $1}\' | tr \'a-z\' \'A-Z\'", "r");
+  if (fp2 == NULL) {
+      printf("Failed to run command\n" );
+      exit(1);
   }
-  ASSERT_EQ(bnew1Found && bnew2Found, true);
+  fgets(sha, sizeof(sha)-1, fp2);
+  //find the rule
+  vector<rule> copy = rulesList->get_rules_copy();
+  //one rule is current and one rule is permanent hence +2
+  ASSERT_EQ(copy.size(), init_rules.size() + 2);
+  bool bFound = false;
+  for (int i=0; i < copy.size(); i++){
+    if (!(copy[i].path == "/tmp/testexe" && copy[i].pid == pid)) continue;
+    bFound = true;
+    ASSERT_EQ(copy[i].path == "/tmp/testexe", true);
+    ASSERT_EQ(copy[i].pid == pid, true);
+    ASSERT_EQ(copy[i].perms == ALLOW_ALWAYS, true);
+    ASSERT_EQ(copy[i].sha == string(sha), true);
+    ASSERT_EQ(copy[i].ctmark_out > 0, true);
+    ASSERT_EQ(copy[i].ctmark_in > 0, true);
+    ASSERT_EQ(copy[i].ctmark_in - copy[i].ctmark_out == CTMARK_DELTA, true);
+    ASSERT_EQ(copy[i].is_fixed_ctmark, false);
+    ASSERT_EQ(copy[i].is_permanent, false);
+    ASSERT_EQ(copy[i].is_forked, false);
+    ASSERT_EQ(copy[i].parentpid == "0", true);
+    ASSERT_EQ(copy[i].stime == stime_for_pid(pid), true);
+    ASSERT_EQ(copy[i].pidfdpath == "/proc/" + pid + "/fd/" , true);
+    ASSERT_EQ(copy[i].dirstream != NULL, true);
+    ASSERT_EQ(copy[i].uid != "", true);
+  }
+  ASSERT_EQ(bFound, true);
+  //also make sure the permanenet rule is present
+  bool bFound2 = false;
+  for (int i=0; i < copy.size(); i++){
+    if (!(copy[i].is_permanent && copy[i].path == "/tmp/testexe")) continue;
+    bFound2 = true;
+    ASSERT_EQ(copy[i].path == "/tmp/testexe", true);
+    ASSERT_EQ(copy[i].perms == ALLOW_ALWAYS, true);
+    ASSERT_EQ(copy[i].sha == string(sha), true);
+    ASSERT_EQ(copy[i].is_permanent, true);
+  }
+  ASSERT_EQ(bFound2, true);
+  kill(child_pid, SIGUSR1);
 
- */
 }
+
+TEST_F(RulesListTest, pathFindAndAdd){
+    /*
+    //try to add a rule already in list ret. search active processes
+    ruleslist_rv rv1 = rulesList->pathFindAndAdd("existing/path", "111", 123);
+    ASSERT_EQ(rv1.success, true);
+    ASSERT_EQ(rv1.value == SEARCH_ACTIVE_PROCESSES_AGAIN, true);
+
+    //rules with same path not found
+    ruleslist_rv rv2 = rulesList->pathFindAndAdd("existing/path", "111", 123);
+    ASSERT_EQ(rv2.success, true);
+    ASSERT_EQ(rv2.value == PATH_IN_RULES_NOT_FOUND, true);
+
+    //no proc/<PID>/stat file
+    ruleslist_rv rv3 = rulesList->pathFindAndAdd("existing/path", "111", 123);
+    ASSERT_EQ(rv3.success, false);
+    ASSERT_EQ(rv3.errormsg == "PROCFS_ERROR in get_parent_pid", true);
+
+    */
+
+    f.setPathToProc(rulesList, "/proc/");
+    //add a forked process
+    pid_t child_pid = fork();
+    if (child_pid == 0){
+        execl("/tmp/testexe", "fork", (char*)0); // we are in child
+    }
+    else if (child_pid < 0){
+        cout << "fork() failed";
+        exit(1);
+    }
+    else {
+        //we are in parent and pid is child's pid
+        string pid = to_string(child_pid);
+        cout << "blocking and waiting for pid " << pid << endl;
+        unix_socket_block("/tmp/lpfwtest" + pid);
+        cout << "after socket block" << endl;
+
+        //add parent first
+        ruleslist_rv rv1 = rulesList->addFromUser(
+                    "/tmp/testexe", pid, ALLOW_ALWAYS, stime_for_pid(pid));
+        cout << rv1.errormsg << endl;
+        ASSERT_EQ(rv1.success, true);
+
+        //add child
+        ifstream f;
+        f.open("/tmp/lpfwtest."+ pid + ".child");
+        char output[100];
+        f >> output;
+        f.close();
+        cout << "read child pid from file:" << output << endl;
+        ruleslist_rv rv2 = rulesList->pathFindAndAdd(
+                    "/tmp/testexe", string(output), stime_for_pid(output));
+        ASSERT_EQ(rv2.success, true);
+        ASSERT_EQ(rv2.value, FORKED_CHILD_ALLOW);
+
+
+
+
+    }
+
+
+
+    //add a parent process to rules
+    //then add the child to rules
+
+
+}
+
+
+
 
 /*
 TEST_F(RulesListTest, remove){

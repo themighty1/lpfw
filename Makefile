@@ -3,9 +3,11 @@ gtestInclude = -Igtest/include
 gtestFLAGS = $(g++FLAGS) $(gtestInclude)
 gtestLinkFLAGS = gtest/gtest-all.o gtest/libgtest.a $(gtestInclude)
 
+.PHONY: all clean tests
+
 all: lpfw testprocess tests
 
-clean: rm -rf *.o testprocess lpfw
+clean: rm -rf *.o testprocess lpfw alltests testexe
 
 lpfw: sha256.o conntrack.o \
       argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
@@ -44,8 +46,10 @@ ruleslist_test.o : ruleslist.o ruleslist_test.cpp
 	g++ $(gtestFLAGS) -c ruleslist_test.cpp
 removeterminatedprocess.o : removeterminatedprocess.cpp removeterminatedprocess.h
 	g++ $(g++FLAGS) -c removeterminatedprocess.cpp
-testexe : testexe.cpp
-	g++ $(g++FLAGS) testexe.cpp -o testexe
+testexe : unix_socket.o testexe.cpp
+	g++ $(g++FLAGS) testexe.cpp unix_socket.o -o testexe
+unix_socket.o : unix_socket.cpp unix_socket.h
+	g++ $(g++FLAGS) -c unix_socket.cpp
 
 
 
@@ -53,8 +57,8 @@ testexe : testexe.cpp
 testprocess: testprocess.cpp
 	g++ -g -std=c++11 testprocess.cpp -lpthread -o testprocess
 	
-tests:	all_tests.cpp rulesfile_test.o ruleslist_test.o testexe
+tests:	all_tests.cpp rulesfile_test.o ruleslist_test.o unix_socket.o testexe
 	g++ $(g++FLAGS) $(gtestLinkFLAGS) \
-	rulesfile.o rulesfile_test.o ruleslist.o sha256.o ruleslist_test.o \
+	rulesfile.o rulesfile_test.o ruleslist.o sha256.o ruleslist_test.o unix_socket.o \
 	all_tests.cpp -lpthread -o alltests
 
