@@ -37,25 +37,24 @@ RulesList::RulesList(vector<rule> newrules){
 //if an exception happens, return an error
 ruleslist_rv RulesList::pathFindAndAdd (const string path,
                              const string pid, const unsigned long long stime){
+  //TODO what do we use stime for?
+  assert(pid != "0");
   ruleslist_rv rv;
 
   try{
   rv.success = false;
   vector<rule> rulescopy = get_rules_copy();
   vector<rule> rulesWithTheSamePath;
-  int i,retval;
+  int i;
   for(i = 0; i < rulescopy.size(); ++i) {
-    if (rulescopy[i].path == path) {
-      if (rulescopy[i].pid == pid){
-        //socket_active_processes_search() didnt pick it up, try again
-        rv.success = true;
-        rv.value = SEARCH_ACTIVE_PROCESSES_AGAIN;
-        return rv;
-      }
-      if (rulescopy[i].is_permanent){
-        rulesWithTheSamePath.push_back(rulescopy[i]);
-      }
+    if (rulescopy[i].path != path) continue;
+    if (rulescopy[i].pid == pid){
+    //socket_active_processes_search() didnt pick it up, try again
+    rv.success = true;
+    rv.value = SEARCH_ACTIVE_PROCESSES_AGAIN;
+    return rv;
     }
+    rulesWithTheSamePath.push_back(rulescopy[i]);
   }
   if (!rulesWithTheSamePath.size()) {
     rv.success = true;
@@ -64,8 +63,11 @@ ruleslist_rv RulesList::pathFindAndAdd (const string path,
   }
 
   string ppid = get_parent_pid(pid);
+  cout << "the parent pid was:" << ppid << endl;
   //If parent's PID is present in rules, then we are dealing with a fork()
   for(i = 0; i < rulesWithTheSamePath.size(); i++) {
+    //there can only be a fork() of a current process
+    if (rulesWithTheSamePath[i].is_permanent) continue;
     if (rulesWithTheSamePath[i].pid != ppid) continue;
     rule parent_rule = rulesWithTheSamePath[i];
     if (parent_rule.is_forked){
@@ -95,24 +97,28 @@ ruleslist_rv RulesList::pathFindAndAdd (const string path,
     ruleslist_rv rvANI;
     rvANI = addNewInstance(path, pid, parent.perms, parent.sha, parent.ctmark_out);
 
-    if (parent.perms == ALLOW_ALWAYS || parent.perms == ALLOW_ONCE){
+    if (parent.perms == ALLOW_ALWAYS){
       rv.value = NEW_INSTANCE_ALLOW;}
-    else if (parent.perms == DENY_ALWAYS || parent.perms == DENY_ONCE){
+    else if (parent.perms == DENY_ALWAYS){
       rv.value = NEW_INSTANCE_DENY;}
+    else{
+        assert(true); //is_permanent must only have *ALWAYS permission
+    }
 
     rv.success = true;
     rv.ctmark = rvANI.ctmark;
     return rv;
   }
 
-  //if new instance and cant find is_permanent, query the user
+  //if new instance and existing rule is not is_permanent, query the user
   rv.success = true;
   rv.value = PATH_IN_RULES_FOUND_BUT_PERMS_ARE_ONCE;
   return rv;
   }
-  catch(std::exception){
+  catch(const string &e){
     //TODO cout << the exception error text
     rv.success = false;
+    rv.errormsg = e;
     rv.value = GENERAL_ERROR;
     return rv;
   }
@@ -130,7 +136,7 @@ ruleslist_rv RulesList::addNewInstance ( const string path, const string pid, co
   //sha256 hasnt changed?
   string sha = get_sha256_hexdigest(path);
   if (sha != parent_sha) {
-     throw("SHA_DONT_MATCH in addNewInstance");
+     throw string("SHA_DONT_MATCH in addNewInstance");
   }
   newrule.path = path;
   newrule.pid = pid;
@@ -223,8 +229,6 @@ ruleslist_rv RulesList::addFromUser ( const string path, const string pid,
   if ( readlink_path != path){
     rv.success = false;
     rv.errormsg = "/proc/PID/exe points to an unexpected path";
-    cout << "ptp is " << path_to_proc << " rp is " << readlink_path <<
-         " pid is " << pid << endl;
     return rv;
   }
 
@@ -285,7 +289,7 @@ ruleslist_rv RulesList::removeInactive (const string path, const string perms, c
     //permanent rules always stay even when no processes are running
     if (rules[i].is_permanent) continue;
     if (rules[i].path != path) continue;
-    if (rules[i].pid != pid || rules[i].parentpid != pid) continue;
+    if (! (rules[i].pid == pid || rules[i].parentpid == pid)) continue;
     if (rules[i].perms != perms){
       _pthread_mutex_unlock ( &rules_mutex );
       rv.success = false;
@@ -327,6 +331,8 @@ ruleslist_rv RulesList::removePermanent (const string path, const string perms) 
   bool bPermanentFound = false;
   ruleslist_rv rv;
   rv.success = false;
+  vector<ctmarks> vctm; //for those rules which are active
+
   for (int i=0; i < rules.size(); i++){
     if (! rules[i].is_permanent) continue;
     if (rules[i].path != path) continue;
@@ -354,9 +360,16 @@ ruleslist_rv RulesList::removePermanent (const string path, const string perms) 
     if (rulescopy[i].path != path) continue;
     if (rulescopy[i].is_forked == true) continue;
     assert(rulescopy[i].pid != "0");
-    removeInactive(path, perms, rulescopy[i].pid);
+    ruleslist_rv rvRI = removeInactive(path, perms, rulescopy[i].pid);
+    if (rvRI.success == false){
+        cout << "error" << rvRI.errormsg << " in removePermanent while in removeInactive";
+        assert(false);
+    }
+    //append vector
+    vctm.insert(vctm.end(), rv.ctmarks_to_delete.begin(), rv.ctmarks_to_delete.end());
   }
   rv.success = true;
+  rv.ctmarks_to_delete = vctm;
   return rv;
 }
 
@@ -389,7 +402,6 @@ string RulesList::get_sha256_hexdigest(string exe_path){
   if (!stream) {
     throw string("fopen error in get_sha256_hexdigest");
   }
-  cout << "after throwing" << endl;
   sha256_stream(stream, (void *)sha_bytearray);
   fclose(stream);
   //convert binary sha to hexlified string
@@ -456,7 +468,7 @@ void RulesList::_pthread_mutex_unlock(pthread_mutex_t* mutex){
 
 DIR* RulesList::_opendir(string path){
   DIR* o = opendir(path.c_str());
-  if (o == NULL){throw("_opendir error");}
+  if (o == NULL){throw string("_opendir error");}
   return o;
 }
 

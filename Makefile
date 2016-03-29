@@ -12,10 +12,10 @@ clean: rm -rf *.o testprocess lpfw alltests testexe
 lpfw: sha256.o conntrack.o \
       argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
       lpfw.cpp lpfw.h common/defines.h common/includes.h \
-      rulesfile.o ruleslist.o removeterminatedprocess.o
+      rulesfile.o ruleslist.o removeterminated.o
 	g++ $(g++FLAGS) sha256.o conntrack.o testmain.o \
 	    argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
-      rulesfile.o ruleslist.o removeterminatedprocess.o\
+      rulesfile.o ruleslist.o removeterminated.o\
 	    lpfw.cpp -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
 sha256.o : sha256/sha256.c sha256/sha256.h sha256/u64.h
@@ -44,21 +44,27 @@ ruleslist.o : ruleslist.cpp ruleslist.h sha256.o
 	g++ $(g++FLAGS) -c ruleslist.cpp
 ruleslist_test.o : ruleslist.o ruleslist_test.cpp
 	g++ $(gtestFLAGS) -c ruleslist_test.cpp
-removeterminatedprocess.o : removeterminatedprocess.cpp removeterminatedprocess.h
-	g++ $(g++FLAGS) -c removeterminatedprocess.cpp
+removeterminated.o : removeterminated.cpp removeterminated.h
+	g++ $(g++FLAGS) -c removeterminated.cpp
+removeterminated_test.o : removeterminated.o removeterminated_test.cpp
+	g++ $(gtestFLAGS) -c removeterminated_test.cpp
 testexe : unix_socket.o testexe.cpp
 	g++ $(g++FLAGS) testexe.cpp unix_socket.o -o testexe
 unix_socket.o : unix_socket.cpp unix_socket.h
 	g++ $(g++FLAGS) -c unix_socket.cpp
-
+testutils.o : testutils.cpp testutils.h
+	g++ $(g++FLAGS) -c testutils.cpp
 
 
 
 testprocess: testprocess.cpp
 	g++ -g -std=c++11 testprocess.cpp -lpthread -o testprocess
 	
-tests:	all_tests.cpp rulesfile_test.o ruleslist_test.o unix_socket.o testexe
+tests:	all_tests.cpp unix_socket.o testutils.o testexe \
+	rulesfile_test.o ruleslist_test.o removeterminated_test.o
 	g++ $(g++FLAGS) $(gtestLinkFLAGS) \
-	rulesfile.o rulesfile_test.o ruleslist.o sha256.o ruleslist_test.o unix_socket.o \
+	sha256.o unix_socket.o testutils.o \
+	rulesfile.o rulesfile_test.o ruleslist.o ruleslist_test.o \
+	removeterminated.o removeterminated_test.o \
 	all_tests.cpp -lpthread -o alltests
 

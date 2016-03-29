@@ -42,8 +42,18 @@ void unix_socket_connect(string name){
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, name.c_str(),
             sizeof(addr.sun_path)-1);
-    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-        perror("connect error");
-        exit(-1);
-      }
+    //it may be possible that the fork()ed child
+    //is trying to connect() faster than the parent could
+    //create the socket. That's why we retry a few times
+    while (true){
+        int i = 0;
+        if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+            perror("connect error");
+            if (i++ == 10) exit(1);
+            continue;
+          }
+        else {
+            break;
+        }
+    }
 }

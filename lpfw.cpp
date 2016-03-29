@@ -50,7 +50,7 @@
 #include "sha256/sha256.h"
 #include "rulesfile.h"
 #include "ruleslist.h"
-#include "removeterminatedprocess.h"
+#include "removeterminated.h"
 
 
 struct pointers_to_classes{
@@ -467,6 +467,7 @@ void ruleslist_delete_all ( const string path) {
 }
 
 
+//OBSOLETE
 //Find and delete one entry in rules
 //the calling thread holds the rules mutex
 void ruleslist_delete_one ( const string path, const string pid, const string perms ) {
@@ -743,7 +744,8 @@ void* thread_refresh ( void* ptr ){
   RulesList* rl = p->rl;
   free(ptr);
   //rtp does not return from endless loop
-  RemoveTerminatedProcess rtp(rl);
+  RemoveTerminated rtp(rl);
+  rtp.loop();
 }
 
 //scan procfs and remove/mark inactive those processes that are no longer running

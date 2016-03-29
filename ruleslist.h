@@ -19,7 +19,7 @@ struct ruleslist_rv{
   bool success = false;
   uint32_t ctmark;
   vector<ctmarks> ctmarks_to_delete;
-  string errormsg = "Error";
+  string errormsg = "No error";
   int value = -1;
 };
 
