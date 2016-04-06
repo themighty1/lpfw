@@ -2219,8 +2219,8 @@ void init_iptables()
   //using /mask caused 10+ second lag when calling iptables
   //_system ("iptables -I OUTPUT 1 -d 127.0.0.0/8 -j ACCEPT");
   //_system ("iptables -I INPUT 1 -d 127.0.0.0/8 -j ACCEPT");
-  _system ("iptables -I OUTPUT 1 -m iprange --dst-range 127.0.0.0-127.255.255.255 -j ACCEPT");
-  _system ("iptables -I INPUT 1 -m iprange --dst-range 127.0.0.0-127.255.255.255 -j ACCEPT");
+  _system ("iptables -I OUTPUT 1 -o lo -j ACCEPT");
+  _system ("iptables -I INPUT 1 -i lo -j ACCEPT");
 
 
   //save and start checking if iptables rules altered
