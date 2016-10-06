@@ -2205,6 +2205,11 @@ void init_iptables()
 {
   _system ("iptables -F INPUT");
   _system ("iptables -F OUTPUT");
+
+  // Accept related or establish connections to make the configuration also work when the default policy is not set to ACCEPT.
+  _system ("iptables -I OUTPUT 1 -m state --state RELATED,ESTABLISHED -j ACCEPT");
+  _system ("iptables -I INPUT 1  -m state --state RELATED,ESTABLISHED -j ACCEPT");
+
   string gid_match = ""; //not in use in normal (non-testing) mode
   if (bTestingMode){
     gid_match= "-m owner --gid-owner lpfwtest"; }
