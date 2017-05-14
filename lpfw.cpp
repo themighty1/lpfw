@@ -61,7 +61,7 @@ struct nfq_handle *globalh_out, *globalh_in;
 //command line arguments available globally
 struct arg_str *logging_facility;
 struct arg_file *rules_file, *pid_file, *log_file, *allow_rule;
-struct arg_int *log_info, *log_traffic, *log_debug;
+struct arg_int *log_info, *log_traffic, *log_debug, *append_mode;
 struct arg_lit *test;
 //Paths of various frontends kept track of in order to chown&chmod them
 struct arg_file *cli_path, *gui_path, *pygui_path;
