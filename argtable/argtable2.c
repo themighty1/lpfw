@@ -28,7 +28,6 @@ USA.
 #include <stdlib.h>
 #include <string.h>
 #include <stdlib.h>
-#include <ctype.h>
 #endif
 
 #ifdef HAVE_STRINGS_H
@@ -45,6 +44,7 @@ USA.
 #include <unistd.h>
 #endif
 
+#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include "argtable2.h"
