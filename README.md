@@ -1,4 +1,4 @@
-UPDATE October 2020. I no longer plan to contribute to this project because a better alternative with an active maintainer and community has appeared over the last years. I recommend using OpenSnitch ( https://github.com/gustavo-iniguez-goya/opensnitch ) which uses similar techniques to LPFW. I plan to contribute to that project. You can still use LPFW, it works but it may be rough around the edges.
+UPDATE October 2020. I no longer plan to contribute to this project because a better alternative with an active maintainer and community has appeared over the last years. I recommend using OpenSnitch ( https://github.com/evilsocket/opensnitch ) which uses similar techniques to LPFW. I plan to contribute to that project. You can still use LPFW, it works but it may be rough around the edges.
 
 
 # Leopard Flower personal firewall for Linux (LPFW)
