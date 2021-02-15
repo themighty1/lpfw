@@ -62,6 +62,7 @@ struct nfq_handle *globalh_out, *globalh_in;
 struct arg_str *logging_facility;
 struct arg_file *rules_file, *pid_file, *log_file, *allow_rule;
 struct arg_int *log_info, *log_traffic, *log_debug;
+struct arg_int *allow_updates;
 struct arg_lit *test;
 //Paths of various frontends kept track of in order to chown&chmod them
 struct arg_file *cli_path, *gui_path, *pygui_path;
@@ -1168,7 +1169,7 @@ int path_find_in_rules ( int &ctmark_out, const string path_in,
     //A rule which was loaded on startup has seen its first packet
     rule loaded_rule = rulesWithTheSamePath[0];
     string sha = get_sha256_hexdigest(loaded_rule.path.c_str());
-    if (loaded_rule.sha != sha) {return SHA_DONT_MATCH; }
+    if (loaded_rule.sha != sha &&  !* ( allow_updates->ival )) {return SHA_DONT_MATCH; }
     _pthread_mutex_lock ( &rules_mutex );
     bool bRuleFound = false;
     //find the rule again (in case rules have changed while the lock was not held)
@@ -1251,7 +1252,7 @@ int path_find_in_rules ( int &ctmark_out, const string path_in,
     //we get here when we have a new instance,
     //check that instance launched from unmodified binary
     string sha = get_sha256_hexdigest(path_in.c_str());
-    if (sha != rulesWithTheSamePath[0].sha ) {return SHA_DONT_MATCH; }
+    if (sha != rulesWithTheSamePath[0].sha && !* ( allow_updates->ival )) {return SHA_DONT_MATCH; }
     // A1. Are there any rules with the same PATH as NP AND *ALWAYS perms? If yes,
     // then create new rule, copy parent's attributes over to NP and continue;
     // A2. If No, i.e. there either aren't any rules with the same PATH as NP OR
@@ -2364,13 +2365,14 @@ int parse_command_line(int argc, char* argv[])
   log_info = arg_int0 ( NULL, "log-info", "<1/0 for yes/no>", "Info messages logging" );
   log_traffic = arg_int0 ( NULL, "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
   log_debug = arg_int0 ( NULL, "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
+  allow_updates = arg_int0 ( NULL, "allow-updates", "<1/0 for yes/no>", "Don't block updated binaries if already allowed" );
   test = arg_lit0 ( NULL, "test", "Run unit test" );
 
   struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
   struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
   struct arg_end *end = arg_end ( 30 );
   void *argtable[] = {logging_facility, rules_file, pid_file, log_file, cli_path,
-      pygui_path, log_info, log_traffic, log_debug, allow_rule, help, version,
+      pygui_path, log_info, log_traffic, log_debug, allow_updates, allow_rule, help, version,
       test, end};
 
   // Set default values
@@ -2395,6 +2397,7 @@ int parse_command_line(int argc, char* argv[])
   log_file->filename[0] = lpfw_logfile_pointer;
 
   * ( log_info->ival ) = 1;
+  * ( allow_updates->ival ) = 0;
   * ( log_traffic->ival ) = 1;
 #ifdef DEBUG
   * ( log_debug->ival ) = 1;
