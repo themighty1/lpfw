@@ -61,7 +61,7 @@ struct nfq_handle *globalh_out, *globalh_in;
 //command line arguments available globally
 struct arg_str *logging_facility;
 struct arg_file *rules_file, *pid_file, *log_file, *allow_rule;
-struct arg_int *log_info, *log_traffic, *log_debug;
+struct arg_int *log_info, *log_traffic, *log_debug, *append_mode;
 struct arg_lit *test;
 //Paths of various frontends kept track of in order to chown&chmod them
 struct arg_file *cli_path, *gui_path, *pygui_path;
@@ -2364,13 +2364,14 @@ int parse_command_line(int argc, char* argv[])
   log_info = arg_int0 ( NULL, "log-info", "<1/0 for yes/no>", "Info messages logging" );
   log_traffic = arg_int0 ( NULL, "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
   log_debug = arg_int0 ( NULL, "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
+  append_mode = arg_int0 ( NULL, "append-mode", "<1/0 for yes/no>", "Append iptables rules instead of inserting them" );
   test = arg_lit0 ( NULL, "test", "Run unit test" );
 
   struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
   struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
   struct arg_end *end = arg_end ( 30 );
   void *argtable[] = {logging_facility, rules_file, pid_file, log_file, cli_path,
-      pygui_path, log_info, log_traffic, log_debug, allow_rule, help, version,
+      pygui_path, log_info, log_traffic, log_debug, append_mode, allow_rule, help, version,
       test, end};
 
   // Set default values
@@ -2395,6 +2396,7 @@ int parse_command_line(int argc, char* argv[])
   log_file->filename[0] = lpfw_logfile_pointer;
 
   * ( log_info->ival ) = 1;
+  * ( append_mode->ival ) = 0;
   * ( log_traffic->ival ) = 1;
 #ifdef DEBUG
   * ( log_debug->ival ) = 1;
@@ -2672,17 +2674,28 @@ void* iptables_check_thread (void *ptr)
 
 void init_iptables()
 {
-  _system ("iptables -F INPUT");
-  _system ("iptables -F OUTPUT");
+  if ( !* ( append_mode->ival ) ) {
+    _system ("iptables -F INPUT");
+    _system ("iptables -F OUTPUT");
+  }
   string gid_match = ""; //not in use in normal (non-testing) mode
   if (bTestingMode) { gid_match= "-m owner --gid-owner lpfwtest"; }
+  if ( !* ( append_mode->ival ) ) {
   _system (string("iptables -I OUTPUT 1 -m state --state NEW " +
                   gid_match + " -j NFQUEUE --queue-num 11220").c_str());
+  } else {
+      _system (string("iptables -A OUTPUT -m state --state NEW " +
+                  gid_match + " -j NFQUEUE --queue-num 11220").c_str());
+  }
   //owner match doesn't work with INPUT hooks
   //During testing we create a per-port iptables rules for each test server listening port
   //That's why we start off with no INPUT rules in testing
   if (!bTestingMode) {
-    _system ("iptables -I INPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11221");
+    if ( !* ( append_mode->ival ) ) {
+      _system ("iptables -I INPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11221");
+    } else {
+	_system ("iptables -A INPUT -m state --state NEW -j NFQUEUE --queue-num 11221");>     
+    }
   }
   //using /mask caused 10+ second lag when calling iptables
   //_system ("iptables -I OUTPUT 1 -d 127.0.0.0/8 -j ACCEPT");
