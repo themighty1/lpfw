@@ -2467,10 +2467,13 @@ void add_to_rulesfile(const char *exefile_path)
   else {rulesfile_stream = _fopen (rules_file->filename[0], "a");}
 
   _fseek (rulesfile_stream, 0, SEEK_END);
+  _fputs ("full_path=        ", rulesfile_stream);
   _fputs (exefile_path, rulesfile_stream);
   _fputc ('\n', rulesfile_stream);
+  _fputs ("permission=       ", rulesfile_stream);
   _fputs (ALLOW_ALWAYS, rulesfile_stream);
   _fputc ('\n', rulesfile_stream);
+  _fputs ("sha256_hexdigest= ", rulesfile_stream);
   _fputs (sha.c_str(), rulesfile_stream);
   _fputc ('\n', rulesfile_stream);
   _fclose (rulesfile_stream);
