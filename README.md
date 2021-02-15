@@ -102,3 +102,7 @@ CAP_NET_ADMIN (to use netfilter_queue and netfilter_conntrack)
 CAP_DAC_READ_SEARCH (to scan all users' /proc/ entries)
 
 See `man 7 capabilities` for more information on capabilities.
+
+## Alternatives
+
+* [Douane](https://github.com/Douane/Douane)
